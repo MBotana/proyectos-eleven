@@ -3,7 +3,7 @@
  * El calendario se publica en /cal/<token>.ics para suscribirse desde Google Calendar. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SCHEMA } from './schema.ts';
-import { PROYECTOS_INICIALES, PLAN_INICIAL, ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, hoyEn, addDays } from '../public/shared.js';
+import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, hoyEn, addDays } from '../public/shared.js';
 
 export interface Env { DB: any; ASSETS?: any }
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -33,11 +33,24 @@ const ready = new WeakSet<object>();
 export async function ensureSchema(env: Env) {
   if (ready.has(env.DB)) return;
   for (const s of SCHEMA) await env.DB.prepare(s).run();
-  if (!(await env.DB.prepare('SELECT 1 AS x FROM projects LIMIT 1').first())) {
+  // Datos iniciales y actualizaciones: suma proyectos y filas de plan nuevas sin pisar lo que ya editaste.
+  const v = Number((await env.DB.prepare("SELECT value FROM settings WHERE key = 'seed_v'").first())?.value ?? 0);
+  if (v < SEED_VERSION) {
     let i = 0;
-    for (const p of PROYECTOS_INICIALES) await env.DB.prepare('INSERT INTO projects (code, cliente, tipo, active, params, orden) VALUES (?, ?, ?, 1, ?, ?)').bind(p.code, p.cliente, p.tipo, JSON.stringify(p.params), i++).run();
+    for (const p of PROYECTOS_INICIALES) {
+      const old = await env.DB.prepare('SELECT params FROM projects WHERE code = ?').bind(p.code).first();
+      if (!old) await env.DB.prepare('INSERT INTO projects (code, cliente, tipo, active, params, orden) VALUES (?, ?, ?, 1, ?, ?)').bind(p.code, p.cliente, p.tipo, JSON.stringify(p.params), i).run();
+      else {
+        const cur = JSON.parse((old.params as string) || '{}');
+        const merged: Record<string, unknown> = { ...p.params };
+        for (const [k, val] of Object.entries(cur)) if (val !== null && val !== '' && val !== undefined) merged[k] = val;
+        await env.DB.prepare('UPDATE projects SET params = ?, orden = ? WHERE code = ?').bind(JSON.stringify(merged), i, p.code).run();
+      }
+      i++;
+    }
     for (const [project, task_type, hours, units] of PLAN_INICIAL.rows)
-      await env.DB.prepare('INSERT INTO plan (month, project, task_type, hours, units) VALUES (?, ?, ?, ?, ?)').bind(PLAN_INICIAL.month, project, task_type, hours, units).run();
+      await env.DB.prepare('INSERT OR IGNORE INTO plan (month, project, task_type, hours, units) VALUES (?, ?, ?, ?, ?)').bind(PLAN_INICIAL.month, project, task_type, hours, units).run();
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('seed_v', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(SEED_VERSION)).run();
   }
   ready.add(env.DB);
 }
@@ -92,7 +105,7 @@ const LB_FIELDS = ['project', 'as_code', 'estado', 'tipo_servicio', 'anchor', 'u
 function cleanLB(b: any) {
   return {
     project: str(b.project, 40), as_code: str(b.as_code, 40).toUpperCase(), estado: oneOf(b.estado, ESTADOS_LB, 'No Iniciado'),
-    tipo_servicio: str(b.tipo_servicio, 60) || 'Intervalo métrica 21-40', anchor: str(b.anchor, 300), url_cliente: str(b.url_cliente, 500),
+    tipo_servicio: oneOf(b.tipo_servicio, TIPOS_SERVICIO, 'Intervalo métrica 21-40'), anchor: str(b.anchor, 300), url_cliente: str(b.url_cliente, 500),
     medio: str(b.medio, 200), dr: numOrNull(b.dr), trafico: numOrNull(b.trafico), precio: numOrNull(b.precio), moneda: oneOf(b.moneda, MONEDAS, 'USD'),
     estado_neg: oneOf(b.estado_neg, ESTADOS_NEG, ''), mail_eleven: str(b.mail_eleven, 120).toLowerCase(), contacto_medio: str(b.contacto_medio, 200),
     deadline: isDate(b.deadline) ? b.deadline : '', notas: str(b.notas, 2000),
@@ -323,7 +336,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (path === '/api/projects' && m === 'POST') {
       const b = await body(); if (!Array.isArray(b.projects)) return fail('Faltan los proyectos');
       for (const p of b.projects) {
-        const pr = p.params || {}, params = { drMin: numOrNull(pr.drMin), trafMin: numOrNull(pr.trafMin), precioMaxUSD: numOrNull(pr.precioMaxUSD), repDias: numOrNull(pr.repDias) };
+        const pr = p.params || {}, params = { drMin: numOrNull(pr.drMin), trafMin: numOrNull(pr.trafMin), precioMaxUSD: numOrNull(pr.precioMaxUSD), repDias: numOrNull(pr.repDias), palabrasMin: numOrNull(pr.palabrasMin), dominio: str(pr.dominio, 120), paises: str(pr.paises, 120), servicio: str(pr.servicio, 60) };
         await env.DB.prepare('UPDATE projects SET cliente = ?, active = ?, params = ? WHERE code = ?').bind(str(p.cliente, 80), p.active ? 1 : 0, JSON.stringify(params), str(p.code, 40)).run();
       }
       return json({ ok: true });

@@ -28,8 +28,8 @@ test('alta, ingreso y datos iniciales', async () => {
   assert.equal((await call(env, '/api/login', 'POST', { password: 'mal-clave-x' })).status, 401);
   const tok = (await call(env, '/api/login', 'POST', { password: 'clave-segura-1' })).j.token;
   const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
-  assert.deepEqual(d.projects.map((p: any) => p.code), ['GAL-LIN-1', 'GAL-RED-1', 'LAV-LIN-4', 'LAV-RED-5', 'NAV-LIN-5', 'NAV-RED-5', 'TEL-LIN-2', 'TEL-RED-2']);
-  assert.ok(!d.projects.some((p: any) => /OMI|XUB/.test(p.code)));
+  assert.deepEqual(d.projects.map((p: any) => p.code), ['GAL-LIN-1', 'GAL-RED-1', 'LAV-LIN-4', 'LAV-RED-5', 'NAV-LIN-5', 'NAV-RED-5', 'OMI-LIN-1', 'OMI-RED-2', 'TEL-LIN-2', 'TEL-RED-2', 'XUB-LIN-1', 'XUB-LIN-2']);
+  assert.ok(!d.projects.some((p: any) => p.code === 'XUB-RED-1'));
   assert.equal(d.plan.find((p: any) => p.project === 'TEL-LIN-2').hours, 16);
 });
 

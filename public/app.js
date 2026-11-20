@@ -1,17 +1,35 @@
-// Proyectos Eleven — app (PWA). Un solo usuario. Todo se guarda en el servidor; el teléfono y la compu ven lo mismo.
+// Proyectos Eleven — app de escritorio (PWA instalable desde Chrome o Edge). Un solo usuario; todo se guarda en el servidor.
 import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, avisosLB, hoyEn, addDays, normDomain } from './shared.js';
 
 const S = {
-  token: localStorage.getItem('pe_token') || '', setup: false, data: null, tab: localStorage.getItem('pe_tab') || 'hoy',
-  f: { lbProj: '', lbEstado: 'activas', lbQ: '', lbSort: 'deadline', redProj: '', redEstado: 'activas', redQ: '', medGroup: 'mail_eleven', medQ: '', mes: hoyEn().slice(0, 7) },
+  token: localStorage.getItem('pe_token') || '', setup: false, data: null, view: localStorage.getItem('pe_view') || 'inicio', calurl: '',
+  f: { lbProj: '', lbEstado: 'activas', lbQ: '', redProj: '', redEstado: 'activas', redQ: '', medGroup: 'mail_eleven', medQ: '', mes: hoyEn().slice(0, 7) },
+  sort: { lb: ['deadline', 1], red: ['fecha_entrega', 1] },
 };
 const $ = (s) => document.querySelector(s);
 const h = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const opts = (list, sel, labels) => list.map((v, i) => `<option value="${h(v)}"${String(v) === String(sel ?? '') ? ' selected' : ''}>${h(labels ? labels[i] : v || '—')}</option>`).join('');
-const fmtD = (d) => (d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '');
-const fmtH = (n) => (Math.round(Number(n || 0) * 100) / 100).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+const fmtD = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(2, 4)}` : '');
+const fmtN = (n, dec = 2) => (n === null || n === undefined || n === '' ? '' : Number(n).toLocaleString('es-AR', { maximumFractionDigits: dec }));
 const hoy = () => hoyEn();
-function hint(t) { const el = $('#hint'); el.textContent = t; el.classList.add('show'); clearTimeout(hint.t); hint.t = setTimeout(() => el.classList.remove('show'), 2200); }
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const mesLargo = (m) => `${MESES[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
+function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2400); }
+
+// íconos de línea (trazos simples)
+const IC = {
+  inicio: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  lb: '<path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/>',
+  red: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  medios: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  horas: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  proyectos: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  appsheet: '<path d="M21 12a9 9 0 0 1-15.5 6.2M3 12a9 9 0 0 1 15.5-6.2"/><path d="M18 2v4h-4M6 22v-4h4"/>',
+  ajustes: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  play: '<path d="M7 4v16l13-8z"/>', stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>', copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+};
+const ic = (k) => `<svg class="i" viewBox="0 0 24 24">${IC[k]}</svg>`;
 
 async function api(path, method = 'GET', body) {
   const r = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(S.token ? { authorization: 'Bearer ' + S.token } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -22,157 +40,158 @@ async function api(path, method = 'GET', body) {
 }
 async function load() {
   try { S.data = await api('/api/data'); localStorage.setItem('pe_cache', JSON.stringify(S.data)); }
-  catch (e) { if (!S.data) { try { S.data = JSON.parse(localStorage.getItem('pe_cache') || 'null'); } catch { /* nada */ } } if (S.token) hint('Sin conexión: ves los últimos datos'); }
+  catch { if (!S.data) { try { S.data = JSON.parse(localStorage.getItem('pe_cache') || 'null'); } catch { /* nada */ } } if (S.token) toast('Sin conexión: se muestran los últimos datos'); }
   render();
 }
 const proj = (code) => S.data.projects.find((p) => p.code === code);
 const projs = (tipo) => S.data.projects.filter((p) => p.active && (!tipo || p.tipo === tipo));
+const estadoBadge = (e) => `<span class="badge b${ESTADOS_LB.indexOf(e) + 1}">${h(e)}</span>`;
+const redBadge = (e) => `<span class="badge b${e === 'Entregada' ? 5 : e === 'En redacción' ? 2 : 1}">${h(e)}</span>`;
+function dlTag(d, done) { if (!d) return '<span class="mute">—</span>'; const t = hoy(); if (done) return `<span class="mute">${fmtD(d)}</span>`; return d < t ? `<span class="tag bad">${fmtD(d)}</span>` : d === t ? `<span class="tag warn">Hoy</span>` : d <= addDays(t, 2) ? `<span class="tag warn">${fmtD(d)}</span>` : fmtD(d); }
 
 // ---------- marco ----------
-const TABS = [['hoy', '🏠', 'Hoy'], ['lb', '🔗', 'Link building'], ['red', '✍️', 'Redacciones'], ['medios', '✉️', 'Medios'], ['horas', '⏱', 'Horas'], ['ajustes', '⚙️', 'Ajustes']];
+const VIEWS = [['inicio', 'Inicio'], ['lb', 'Link building'], ['red', 'Redacciones'], ['medios', 'Medios y contactos'], ['horas', 'Horas'], ['proyectos', 'Proyectos'], ['sep'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
 function render() {
   if (!S.token) return renderLogin();
-  if (!S.data) { $('#app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
-  const nav = TABS.map(([k, ic, t]) => `<button data-act="tab" data-v="${k}" class="${S.tab === k ? 'on' : ''}">${t}</button>`).join('');
-  $('#top').innerHTML = `<img class="logo" src="/icon.svg" alt=""><div class="title">Proyectos Eleven</div><nav>${nav}</nav>`;
-  $('#tabs').innerHTML = TABS.map(([k, ic, t]) => `<button data-act="tab" data-v="${k}" class="${S.tab === k ? 'on' : ''}"><span>${ic}</span>${t === 'Link building' ? 'LB' : t}</button>`).join('');
-  $('#app').innerHTML = ({ hoy: vHoy, lb: vLB, red: vRED, medios: vMedios, horas: vHoras, ajustes: vAjustes }[S.tab] || vHoy)();
-  tickTimer();
+  if (!S.data) { $('#app').innerHTML = '<div class="login"><div class="mute">Cargando…</div></div>'; return; }
+  if (!$('#shell')) $('#app').innerHTML = `<div id="shell"><aside id="side"><div class="brand"><img src="/icon.svg" alt=""><div><b>Proyectos Eleven</b><small>Link building · Contenido</small></div></div><nav id="nav"></nav><div id="sidetimer"></div></aside><section id="main"><header id="head"></header><div id="view"></div></section></div>`;
+  const counts = { lb: S.data.lb.filter((t) => !PUBLICADOS.has(t.estado)).length, red: S.data.red.filter((r) => r.estado !== 'Entregada').length, appsheet: S.data.as_pend.length };
+  $('#nav').innerHTML = VIEWS.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</button>`)).join('');
+  const v = VIEWS_FN[S.view] || VIEWS_FN.inicio, out = v();
+  $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}</div>`;
+  const keep = $('#view').scrollTop; $('#view').innerHTML = out.body; $('#view').scrollTop = keep;
+  renderTimer();
 }
 function renderLogin() {
-  $('#top').innerHTML = ''; $('#tabs').innerHTML = '';
-  $('#app').innerHTML = `<div class="login"><img src="/icon.svg" alt=""><h1 style="margin-top:10px">Proyectos Eleven</h1>
-    <div class="card"><form id="loginf"><label>${S.setup ? 'Creá tu contraseña (mínimo 8 caracteres)' : 'Contraseña'}<input type="password" name="pw" autocomplete="${S.setup ? 'new-password' : 'current-password'}" required minlength="8"></label>
-    <button class="btn" style="width:100%;margin-top:10px">${S.setup ? 'Crear y entrar' : 'Entrar'}</button><div class="err" id="lerr"></div></form></div></div>`;
+  $('#app').innerHTML = `<div class="login"><form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${S.setup ? 'Primera vez: creá tu contraseña (mínimo 8 caracteres).' : 'Ingresá con tu contraseña.'}</p>
+    <label>Contraseña<input type="password" name="pw" autocomplete="${S.setup ? 'new-password' : 'current-password'}" required minlength="8" autofocus></label>
+    <button class="btn full" style="margin-top:14px">${S.setup ? 'Crear y entrar' : 'Entrar'}</button><div class="err" id="lerr"></div></form></div>`;
 }
+const searchBox = (f, ph) => `<div class="search">${ic('search')}<input type="search" data-f="${f}" placeholder="${ph}" value="${h(S.f[f])}"></div>`;
+function th(view, key, label, cls = '') { const [k, d] = S.sort[view]; return `<th data-sort="${key}" data-sv="${view}" class="${cls}">${label}${k === key ? `<span class="arr">${d > 0 ? '▲' : '▼'}</span>` : ''}</th>`; }
+function sortBy(arr, view, getters) { const [k, d] = S.sort[view], g = getters[k] || ((x) => x[k] ?? ''); return arr.sort((a, b) => { const x = g(a), y = g(b); return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'es', { numeric: true })) * d; }); }
 
-// ---------- Hoy ----------
+// ---------- Inicio ----------
 function pendientes() {
-  const d = S.data, out = [];
-  for (const t of d.lb) if (t.deadline && !PUBLICADOS.has(t.estado)) out.push({ kind: 'lb', id: t.id, d: t.deadline, title: t.anchor || t.as_code || 'Tarea de LB', sub: [t.project, t.as_code, t.estado, t.medio].filter(Boolean).join(' · ') });
-  for (const r of d.red) if (r.fecha_entrega && r.estado !== 'Entregada') out.push({ kind: 'red', id: r.id, d: r.fecha_entrega, title: r.tema, sub: [r.project, r.estado, r.prioridad !== 'Normal' && 'Prioridad ' + r.prioridad].filter(Boolean).join(' · ') });
+  const out = [];
+  for (const t of S.data.lb) if (t.deadline && !PUBLICADOS.has(t.estado)) out.push({ kind: 'lb', id: t.id, d: t.deadline, tipo: 'Link', title: t.anchor || '(sin anchor)', code: t.as_code, project: t.project, estado: estadoBadge(t.estado) });
+  for (const r of S.data.red) if (r.fecha_entrega && r.estado !== 'Entregada') out.push({ kind: 'red', id: r.id, d: r.fecha_entrega, tipo: 'Redacción', title: r.tema, code: '', project: r.project, estado: redBadge(r.estado) });
   return out.sort((a, b) => a.d.localeCompare(b.d));
 }
-function itemDL(x) {
-  const t = hoy(), cls = x.d < t ? 'bad' : x.d === t ? 'warn' : '';
-  return `<div class="item" data-act="open" data-kind="${x.kind}" data-id="${x.id}"><div><div class="main">${x.kind === 'lb' ? '🔗' : '✍️'} ${h(x.title)}</div><div class="meta">${h(x.sub)}</div></div>
-    <div class="side"><span class="pill ${cls}">${x.d < t ? 'Vencida ' : ''}${fmtD(x.d)}</span></div></div>`;
-}
-function vHoy() {
-  const t = hoy(), p = pendientes(), venc = p.filter((x) => x.d < t), hoyL = p.filter((x) => x.d === t), prox = p.filter((x) => x.d > t && x.d <= addDays(t, 7));
-  const hrsHoy = S.data.hours.filter((x) => x.date === t), totHoy = hrsHoy.reduce((a, x) => a + x.hours, 0);
+function horasMes(mes) { return S.data.hours.filter((x) => x.date.startsWith(mes)).reduce((a, x) => a + x.hours, 0); }
+function planMes(mes) { return S.data.plan.filter((p) => p.month === mes).reduce((a, p) => a + p.hours, 0); }
+const VIEWS_FN = {};
+VIEWS_FN.inicio = () => {
+  const t = hoy(), mes = t.slice(0, 7), p = pendientes(), venc = p.filter((x) => x.d < t), prox = p.filter((x) => x.d <= addDays(t, 7));
+  const totHoy = S.data.hours.filter((x) => x.date === t).reduce((a, x) => a + x.hours, 0);
   const lunes = addDays(t, -((new Date(t + 'T12:00:00Z').getUTCDay() + 6) % 7)), totSem = S.data.hours.filter((x) => x.date >= lunes && x.date <= t).reduce((a, x) => a + x.hours, 0);
-  const conAvisos = S.data.lb.filter((x) => !PUBLICADOS.has(x.estado)).map((x) => ({ x, a: avisosLB(x, proj(x.project), S.data.lb) })).filter((o) => o.a.length);
-  const nAS = S.data.as_pend.length;
-  const bloque = (titulo, arr) => (arr.length ? `<h3>${titulo} (${arr.length})</h3><div class="list">${arr.map(itemDL).join('')}</div>` : '');
-  return `<div class="grid three"><div>
-    <div class="card"><h2>📅 Deadlines</h2>${bloque('Vencidas', venc)}${bloque('Hoy', hoyL)}${bloque('Próximos 7 días', prox)}
-      ${!venc.length && !hoyL.length && !prox.length ? '<div class="empty">Nada para los próximos 7 días.</div>' : ''}
-      <div class="row wrap" style="margin-top:10px"><button class="btn sm" data-act="newlb">+ Tarea LB</button><button class="btn sm ghost" data-act="newred">+ Redacción</button></div></div>
-    ${conAvisos.length ? `<div class="card"><h2>⚠️ Tareas que van a rebotar en AppSheet</h2><div class="list">${conAvisos.map(({ x, a }) => `<div class="item" data-act="open" data-kind="lb" data-id="${x.id}"><div><div class="main">${h(x.as_code || x.anchor || 'Tarea')}</div><div class="meta">${h(x.project)} · ${h(x.medio)}</div><div class="warnbox">${a.map((s) => `<div>${h(s)}</div>`).join('')}</div></div><div></div></div>`).join('')}</div></div>` : ''}
-  </div><div>
-    <div class="card" id="timercard">${timerHTML()}</div>
-    <div class="card"><h2>⏱ Horas</h2><div class="row between"><div class="stat"><span class="mute small">Hoy</span><span class="big">${fmtH(totHoy)} h</span></div><div class="stat" style="text-align:right"><span class="mute small">Esta semana</span><span class="big">${fmtH(totSem)} h</span></div></div>
-      ${hrsHoy.length ? `<div class="list" style="margin-top:8px">${hrsHoy.map(hourItem).join('')}</div>` : ''}
-      <button class="btn sm" style="margin-top:10px" data-act="newhours">+ Cargar horas</button></div>
-    <div class="card"><h2>🔁 Para reflejar en AppSheet</h2><p class="mute" style="margin:0 0 8px">${nAS ? `${nAS} cambio${nAS > 1 ? 's' : ''} hecho${nAS > 1 ? 's' : ''} acá que todavía no están en AppSheet.` : 'Todo al día.'}</p>${nAS ? '<button class="btn sm ghost" data-act="tab" data-v="ajustes">Ver lista</button>' : ''}</div>
-  </div></div>`;
+  const pm = planMes(mes), rm = horasMes(mes);
+  const rebotes = S.data.lb.filter((x) => !PUBLICADOS.has(x.estado)).map((x) => ({ x, a: avisosLB(x, proj(x.project), S.data.lb) })).filter((o) => o.a.length);
+  const fecha = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+  return {
+    title: 'Inicio', sub: fecha.charAt(0).toUpperCase() + fecha.slice(1),
+    actions: `<button class="btn sec" data-act="newhours">${ic('horas')}Cargar horas</button><button class="btn sec" data-act="newred">${ic('plus')}Redacción</button><button class="btn" data-act="newlb">${ic('plus')}Tarea de LB</button>`,
+    body: `<div class="kpis">
+      <div class="kpi"><div class="k">Horas hoy</div><div class="v">${fmtN(totHoy)}</div><div class="d">Semana: ${fmtN(totSem)} h</div></div>
+      <div class="kpi"><div class="k">Horas del mes</div><div class="v">${fmtN(rm)} <span class="mute" style="font-size:14px;font-weight:500">/ ${fmtN(pm)}</span></div><div class="d">${pm ? Math.round((rm / pm) * 100) : 0}% del plan de ${MESES[Number(mes.slice(5)) - 1]}</div></div>
+      <div class="kpi ${venc.length ? 'hot' : ''}"><div class="k">Vencidas</div><div class="v">${venc.length}</div><div class="d">${prox.length - venc.length} en los próximos 7 días</div></div>
+      <div class="kpi ${rebotes.length ? 'hot' : ''}"><div class="k">Tareas que rebotarían</div><div class="v">${rebotes.length}</div><div class="d">Según parámetros del proyecto</div></div>
+      <div class="kpi"><div class="k">Pendientes AppSheet</div><div class="v">${S.data.as_pend.length}</div><div class="d">Cambios sin reflejar</div></div></div>
+    <div class="cols c21"><div class="card"><div class="ch"><h2>Próximos vencimientos</h2><span class="sub">Vencidas y próximos 7 días</span></div>
+      ${prox.length ? `<table class="tbl"><thead><tr><th>Vence</th><th>Tipo</th><th>Proyecto</th><th>Tarea</th><th>Estado</th></tr></thead><tbody>${prox.map((x) => `<tr data-open="${x.kind}" data-id="${x.id}"><td>${dlTag(x.d)}</td><td class="mute">${x.tipo}</td><td class="mono">${h(x.project)}</td><td>${h(x.title)}${x.code ? ` <span class="mute mono">${h(x.code)}</span>` : ''}</td><td>${x.estado}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Sin vencimientos en los próximos 7 días.</div>'}</div>
+      <div class="card"><div class="ch"><h2>Tareas que rebotarían en AppSheet</h2></div>
+      ${rebotes.length ? `<table class="tbl"><tbody>${rebotes.map(({ x, a }) => `<tr data-open="lb" data-id="${x.id}"><td class="wrap"><div><b class="mono">${h(x.as_code || x.project)}</b> <span class="mute">· ${h(normDomain(x.medio))}</span></div><ul class="warnlist">${a.map((s) => `<li>${h(s)}</li>`).join('')}</ul></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Ninguna tarea activa incumple los parámetros.</div>'}</div></div>
+    <div class="cols c11">${proyectosResumen(mes)}</div>`,
+  };
+};
+function proyectosResumen(mes) {
+  const rows = projs().map((p) => {
+    const pl = S.data.plan.filter((x) => x.month === mes && x.project === p.code), ph = pl.reduce((a, x) => a + x.hours, 0), pu = pl.reduce((a, x) => a + x.units, 0);
+    const rh = S.data.hours.filter((x) => x.date.startsWith(mes) && x.project === p.code).reduce((a, x) => a + x.hours, 0);
+    return { p, ph, pu, rh, hu: hechas(p, mes) };
+  });
+  const tbl = (tipo, titulo) => `<div class="card"><div class="ch"><h2>${titulo}</h2><span class="sub">${mesLargo(mes)}</span></div><table class="tbl"><thead><tr><th>Proyecto</th><th>Cliente</th><th class="num">Horas</th><th></th><th class="num">Unidades</th></tr></thead><tbody>
+    ${rows.filter((r) => r.p.tipo === tipo).map((r) => `<tr data-act="view" data-v="horas"><td class="mono">${h(r.p.code)}</td><td>${h(r.p.cliente)}</td><td class="num">${fmtN(r.rh)} / ${fmtN(r.ph)}</td><td>${bar(r.rh, r.ph)}</td><td class="num">${r.hu} / ${r.pu}</td></tr>`).join('')}</tbody></table></div>`;
+  return tbl('LIN', 'Link building por proyecto') + tbl('RED', 'Redacción por proyecto');
 }
-function hourItem(x) {
-  return `<div class="item" data-act="edithours" data-id="${x.id}"><div><div class="main">${h(x.project)} · ${h(x.task_type)}</div><div class="meta">${fmtD(x.date)}${x.note ? ' · ' + h(x.note) : ''}</div></div><div class="side"><b>${fmtH(x.hours)} h</b></div></div>`;
-}
-
-// ---------- cronómetro (guardado en el servidor: sigue corriendo entre compu y teléfono) ----------
-const timer = () => { try { return JSON.parse(S.data.settings.timer || 'null'); } catch { return null; } };
-function timerHTML() {
-  const tm = timer();
-  if (tm) return `<h2>⏱ Cronómetro</h2><div class="mute small">${h(tm.project)} · ${h(tm.task_type)}</div><div class="timer" id="tclock">0:00:00</div>
-    <div class="row" style="margin-top:8px"><button class="btn" data-act="tstop">Detener y guardar</button><button class="btn ghost" data-act="tdiscard">Descartar</button></div>`;
-  const ps = projs();
-  return `<h2>⏱ Cronómetro</h2><div class="fields"><label>Proyecto<select id="tproj" data-act="tproj">${opts(ps.map((p) => p.code), S.tproj || ps[0]?.code)}</select></label>
-    <label>Tarea<select id="ttype">${opts(TAREAS[proj(S.tproj || ps[0]?.code)?.tipo || 'LIN'])}</select></label></div><button class="btn" style="margin-top:10px" data-act="tstart">Iniciar</button>`;
-}
-function tickTimer() {
-  clearInterval(tickTimer.i); const tm = timer(); if (!tm) return;
-  const up = () => { const el = $('#tclock'); if (!el) return clearInterval(tickTimer.i); const s = Math.max(0, Math.floor((Date.now() - tm.start) / 1000)); el.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
-  up(); tickTimer.i = setInterval(up, 1000);
-}
-async function setTimer(v) { await api('/api/settings', 'POST', { timer: v ? JSON.stringify(v) : '' }); S.data.settings.timer = v ? JSON.stringify(v) : ''; }
+const bar = (r, p) => `<span class="bar"><i class="${p > 0 && r > p ? 'over' : ''}" style="width:${p > 0 ? Math.min(100, (r / p) * 100) : r > 0 ? 100 : 0}%"></i></span>`;
+const hechas = (p, mes) => (p.tipo === 'LIN' ? S.data.lb.filter((t) => t.project === p.code && t.publicado && t.publicado.startsWith(mes)).length : S.data.red.filter((r) => r.project === p.code && r.entregada && r.entregada.startsWith(mes)).length);
 
 // ---------- Link building ----------
-function lbFiltradas() {
+VIEWS_FN.lb = () => {
   const f = S.f, q = f.lbQ.trim().toLowerCase();
   let arr = S.data.lb.filter((t) => (!f.lbProj || t.project === f.lbProj) && (f.lbEstado === 'todas' || (f.lbEstado === 'activas' ? !PUBLICADOS.has(t.estado) : t.estado === f.lbEstado)));
   if (q) arr = arr.filter((t) => [t.as_code, t.anchor, t.medio, t.mail_eleven, t.contacto_medio, t.url_cliente, t.notas].join(' ').toLowerCase().includes(q));
-  const key = { deadline: (t) => t.deadline || '9999', proyecto: (t) => t.project + (t.deadline || '9999'), estado: (t) => String(ESTADOS_LB.indexOf(t.estado)).padStart(2, '0') + (t.deadline || '9999'), mail: (t) => (t.mail_eleven || '~') + t.project, medio: (t) => normDomain(t.medio) || '~' }[f.lbSort];
-  return arr.sort((a, b) => key(a).localeCompare(key(b)));
-}
-function vLB() {
-  const f = S.f, arr = lbFiltradas(), t = hoy();
-  return `<div class="card"><div class="toolbar">
-      <select data-f="lbProj"><option value="">Todos los proyectos</option>${opts(projs('LIN').map((p) => p.code), f.lbProj)}</select>
-      <select data-f="lbEstado">${opts(['activas', 'todas', ...ESTADOS_LB], f.lbEstado, ['Activas', 'Todas', ...ESTADOS_LB])}</select>
-      <select data-f="lbSort">${opts(['deadline', 'proyecto', 'estado', 'mail', 'medio'], f.lbSort, ['Orden: deadline', 'Orden: proyecto', 'Orden: estado', 'Orden: mail Eleven', 'Orden: medio'])}</select>
-      <input type="search" data-f="lbQ" placeholder="Buscar anchor, medio, mail, código…" value="${h(f.lbQ)}"><button class="btn" data-act="newlb">+ Nueva tarea</button></div>
-    <div class="mute small" style="margin-bottom:6px">${arr.length} tarea${arr.length === 1 ? '' : 's'}</div>
-    <div class="list">${arr.map((x) => {
-      const av = PUBLICADOS.has(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb);
-      return `<div class="item" data-act="open" data-kind="lb" data-id="${x.id}"><div><div class="main">${h(x.anchor || '(sin anchor)')}${av.length ? ` <span class="pill warn" title="${h(av.join('\n'))}">⚠️ ${av.length}</span>` : ''}</div>
-        <div class="meta"><span>${h(x.project)}</span>${x.as_code ? `<span>${h(x.as_code)}</span>` : ''}${x.medio ? `<span>🌐 ${h(normDomain(x.medio))}</span>` : ''}${x.mail_eleven ? `<span>✉️ ${h(x.mail_eleven)}</span>` : ''}${x.estado_neg ? `<span>${h(x.estado_neg)}</span>` : ''}${x.precio !== null && x.precio !== undefined ? `<span>${h(x.moneda)} ${fmtH(x.precio)}</span>` : ''}</div></div>
-        <div class="side"><select data-act="lbestado" data-id="${x.id}">${opts(ESTADOS_LB, x.estado)}</select>${x.deadline ? `<span class="pill ${!PUBLICADOS.has(x.estado) && x.deadline < t ? 'bad' : x.deadline === t ? 'warn' : 'gray'}">${fmtD(x.deadline)}</span>` : ''}</div></div>`;
-    }).join('') || '<div class="empty">No hay tareas con estos filtros.</div>'}</div></div>`;
-}
+  sortBy(arr, 'lb', { deadline: (t) => t.deadline || '9999', estado: (t) => ESTADOS_LB.indexOf(t.estado), dr: (t) => Number(t.dr ?? -1), precio: (t) => Number(t.precio ?? -1), medio: (t) => normDomain(t.medio) });
+  return {
+    title: 'Link building', sub: `${arr.length} tarea${arr.length === 1 ? '' : 's'}${f.lbEstado === 'activas' ? ' activas' : ''}`,
+    actions: `<button class="btn" data-act="newlb">${ic('plus')}Nueva tarea</button>`,
+    body: `<div class="toolbar"><select data-f="lbProj"><option value="">Todos los proyectos</option>${opts(projs('LIN').map((p) => p.code), f.lbProj, projs('LIN').map((p) => `${p.code} · ${p.cliente}`))}</select>
+      <select data-f="lbEstado">${opts(['activas', 'todas', ...ESTADOS_LB], f.lbEstado, ['Activas', 'Todas', ...ESTADOS_LB])}</select>${searchBox('lbQ', 'Buscar anchor, medio, mail, código…')}</div>
+    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('lb', 'as_code', 'Código / proyecto')}${th('lb', 'anchor', 'Anchor')}${th('lb', 'medio', 'Medio')}${th('lb', 'dr', 'DR', 'num')}${th('lb', 'mail_eleven', 'Contacté desde')}${th('lb', 'precio', 'Precio', 'num')}${th('lb', 'deadline', 'Deadline')}${th('lb', 'estado', 'Estado')}</tr></thead><tbody>
+      ${arr.map((x) => { const av = PUBLICADOS.has(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb);
+        return `<tr data-open="lb" data-id="${x.id}"><td class="mono">${x.as_code ? h(x.as_code) : `<span class="mute">${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
+          <td>${h(normDomain(x.medio))}</td><td class="num">${fmtN(x.dr)}</td><td title="${h(x.estado_neg)}">${h(x.mail_eleven)}</td><td class="num nowrap">${x.precio !== null && x.precio !== undefined ? `${h(x.moneda)} ${fmtN(x.precio)}` : ''}</td><td>${dlTag(x.deadline, PUBLICADOS.has(x.estado))}</td>
+          <td><select data-act="lbestado" data-id="${x.id}">${opts(ESTADOS_LB, x.estado)}</select></td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">No hay tareas con estos filtros.</td></tr>'}</tbody></table></div>`,
+  };
+};
 function lbForm(x = {}) {
-  const ps = projs('LIN'), p = x.project || S.f.lbProj || ps[0]?.code;
-  return `<div class="sheet"><h2>${x.id ? 'Tarea de link building' : 'Nueva tarea de link building'}</h2><form id="lbf" data-id="${h(x.id || '')}">
-    <div class="fields three">
-      <label>Proyecto<select name="project">${opts(ps.map((q) => q.code), p)}</select></label>
-      <label>Código en AppSheet<input name="as_code" placeholder="TEL-LIN-2-169" value="${h(x.as_code)}"></label>
+  const ps = projs('LIN'), p = x.project || S.f.lbProj || ps[0]?.code, pp = proj(p)?.params || {};
+  const mails = [...new Set(S.data.lb.map((t) => t.mail_eleven).filter(Boolean))].sort();
+  return `<form id="lbf" data-id="${h(x.id || '')}"><div class="dh"><h2>${x.id ? h(x.as_code || 'Tarea de link building') : 'Nueva tarea de link building'}</h2><button type="button" class="x" data-act="close" title="Cerrar (Esc)">${ic('x')}</button></div>
+    <div class="db"><div class="fields">
+      <div class="section">Tarea</div>
+      <label>Proyecto<select name="project" data-act="lbproj">${opts(ps.map((q) => q.code), p, ps.map((q) => `${q.code} · ${q.cliente}`))}</select></label>
+      <label>Código en AppSheet<input name="as_code" class="mono" placeholder="${h(p)}-00" value="${h(x.as_code)}"></label>
       <label>Estado<select name="estado">${opts(ESTADOS_LB, x.estado || 'No Iniciado')}</select></label>
       <label>Deadline<input type="date" name="deadline" value="${h(x.deadline)}"></label>
-      <label>Tipo de servicio<select name="tipo_servicio">${opts(TIPOS_SERVICIO, x.tipo_servicio)}</select></label>
+      <label>Tipo de servicio<select name="tipo_servicio">${opts(TIPOS_SERVICIO, x.tipo_servicio || pp.servicio)}</select></label>
       <label>Negociación<select name="estado_neg">${opts(ESTADOS_NEG, x.estado_neg)}</select></label>
       <label class="full">Anchor text<input name="anchor" value="${h(x.anchor)}"></label>
-      <label class="full">URL del cliente<input name="url_cliente" type="url" value="${h(x.url_cliente)}"></label>
-      <label>Medio (dominio)<input name="medio" placeholder="diario.com.ar" value="${h(x.medio)}"></label>
-      <label>DR<input name="dr" type="number" step="any" value="${h(x.dr)}"></label>
-      <label>Tráfico orgánico<input name="trafico" type="number" step="1" value="${h(x.trafico)}"></label>
+      <label class="full">URL del cliente<input name="url_cliente" type="url" placeholder="https://${h(pp.dominio || '')}" value="${h(x.url_cliente)}"></label>
+      <div class="section">Medio</div>
+      <label>Dominio<input name="medio" placeholder="diario.com.ar" value="${h(x.medio)}"></label>
+      <div class="fields" style="gap:10px"><label>DR<input name="dr" type="number" step="any" value="${h(x.dr)}"></label><label>Tráfico<input name="trafico" type="number" step="1" value="${h(x.trafico)}"></label></div>
       <label>Precio<input name="precio" type="number" step="any" value="${h(x.precio)}"></label>
       <label>Moneda<select name="moneda">${opts(MONEDAS, x.moneda || 'USD')}</select></label>
-      <label>Mail desde el que contacté<input name="mail_eleven" type="email" list="mails" placeholder="vos@eleven-agencia.net" value="${h(x.mail_eleven)}"></label>
-      <label class="full">Contacto del medio (mail, nombre o proveedor)<input name="contacto_medio" value="${h(x.contacto_medio)}"></label>
+      <div class="section">Contacto</div>
+      <label>Mail desde el que contacté<input name="mail_eleven" type="email" list="mails" placeholder="nombre@eleven-agencia.net" value="${h(x.mail_eleven)}"></label>
+      <label>Contacto del medio<input name="contacto_medio" placeholder="Mail, nombre o proveedor" value="${h(x.contacto_medio)}"></label>
       <label class="full">Notas<textarea name="notas">${h(x.notas)}</textarea></label>
-    </div><datalist id="mails">${[...new Set(S.data.lb.map((t) => t.mail_eleven).filter(Boolean))].map((m) => `<option value="${h(m)}">`).join('')}</datalist>
-    <div id="lbav"></div><div class="err" id="ferr"></div>
-    <div class="actions">${x.id ? '<button type="button" class="btn danger left" data-act="dellb">Borrar</button>' : ''}<button type="button" class="btn ghost" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form></div>`;
+    </div><datalist id="mails">${mails.map((m) => `<option value="${h(m)}">`).join('')}</datalist>
+    <div id="lbav"></div><div class="err" id="ferr"></div></div>
+    <div class="df">${x.id ? `<button type="button" class="btn danger left" data-act="del" data-kind="lb">Borrar</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
 }
 function lbAvisosVivos() {
   const f = $('#lbf'); if (!f) return;
   const x = Object.fromEntries(new FormData(f)); x.id = f.dataset.id;
-  const a = avisosLB(x, proj(x.project), S.data.lb);
-  $('#lbav').innerHTML = a.length && !PUBLICADOS.has(x.estado) ? `<div class="warnbox">${a.map((s) => `<div>⚠️ ${h(s)}</div>`).join('')}</div>` : '';
+  const a = PUBLICADOS.has(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb), pp = proj(x.project)?.params || {};
+  const lim = [pp.drMin != null && `DR ≥ ${pp.drMin}`, pp.trafMin != null && `tráfico ≥ ${fmtN(pp.trafMin)}`, pp.precioMaxUSD != null && `USD ≤ ${pp.precioMaxUSD}`, pp.repDias && `repetir medio cada ${pp.repDias} días`, pp.palabrasMin && `${pp.palabrasMin} palabras mín.`].filter(Boolean).join(' · ');
+  $('#lbav').innerHTML = (lim ? `<p class="small mute" style="margin:14px 0 0">Parámetros de ${h(x.project)}: ${lim}</p>` : '') + (a.length ? `<div class="alert"><b style="color:var(--warn);font-size:12.5px">AppSheet va a rechazar o frenar esta tarea</b><ul class="warnlist">${a.map((s) => `<li>${h(s)}</li>`).join('')}</ul></div>` : '');
 }
 
 // ---------- Redacciones ----------
-function vRED() {
-  const f = S.f, q = f.redQ.trim().toLowerCase(), t = hoy();
+VIEWS_FN.red = () => {
+  const f = S.f, q = f.redQ.trim().toLowerCase();
   let arr = S.data.red.filter((r) => (!f.redProj || r.project === f.redProj) && (f.redEstado === 'todas' || (f.redEstado === 'activas' ? r.estado !== 'Entregada' : r.estado === f.redEstado)));
   if (q) arr = arr.filter((r) => [r.tema, r.subproyecto, r.notas].join(' ').toLowerCase().includes(q));
+  sortBy(arr, 'red', { fecha_entrega: (r) => r.fecha_entrega || '9999', prioridad: (r) => -PRIORIDADES.indexOf(r.prioridad), estado: (r) => ESTADOS_RED.indexOf(r.estado) });
   const pendAS = new Set(S.data.as_pend.filter((a) => a.entity === 'red').map((a) => a.ref));
-  return `<div class="card"><div class="toolbar">
-      <select data-f="redProj"><option value="">Todos los proyectos</option>${opts(projs('RED').map((p) => p.code), f.redProj)}</select>
-      <select data-f="redEstado">${opts(['activas', 'todas', ...ESTADOS_RED], f.redEstado, ['Activas', 'Todas', ...ESTADOS_RED])}</select>
-      <input type="search" data-f="redQ" placeholder="Buscar tema…" value="${h(f.redQ)}"><button class="btn" data-act="newred">+ Nueva redacción</button></div>
-    <div class="list">${arr.map((r) => `<div class="item" data-act="open" data-kind="red" data-id="${r.id}"><div><div class="main">${h(r.tema)}</div>
-        <div class="meta"><span>${h(r.project)}</span>${r.subproyecto ? `<span>${h(r.subproyecto)}</span>` : ''}<span>${r.ia ? '🤖 IA' : '✋ Manual'}</span>${r.prioridad !== 'Normal' ? `<span>Prioridad ${h(r.prioridad)}</span>` : ''}${pendAS.has(r.id) ? '<span class="pill">Falta en AppSheet</span>' : ''}</div></div>
-        <div class="side"><select data-act="redestado" data-id="${r.id}">${opts(ESTADOS_RED, r.estado)}</select>${r.fecha_entrega ? `<span class="pill ${r.estado !== 'Entregada' && r.fecha_entrega < t ? 'bad' : r.fecha_entrega === t ? 'warn' : 'gray'}">${fmtD(r.fecha_entrega)}</span>` : ''}</div></div>`).join('') || '<div class="empty">No hay redacciones con estos filtros.</div>'}</div></div>`;
-}
+  return {
+    title: 'Redacciones', sub: `${arr.length} redacci${arr.length === 1 ? 'ón' : 'ones'}`, actions: `<button class="btn" data-act="newred">${ic('plus')}Nueva redacción</button>`,
+    body: `<div class="toolbar"><select data-f="redProj"><option value="">Todos los proyectos</option>${opts(projs('RED').map((p) => p.code), f.redProj, projs('RED').map((p) => `${p.code} · ${p.cliente}`))}</select>
+      <select data-f="redEstado">${opts(['activas', 'todas', ...ESTADOS_RED], f.redEstado, ['Activas', 'Todas', ...ESTADOS_RED])}</select>${searchBox('redQ', 'Buscar tema…')}</div>
+    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('red', 'tema', 'Tema')}${th('red', 'project', 'Proyecto')}${th('red', 'subproyecto', 'Subproyecto')}${th('red', 'ia', 'Tipo')}${th('red', 'prioridad', 'Prioridad')}${th('red', 'fecha_entrega', 'Entrega')}<th>AppSheet</th>${th('red', 'estado', 'Estado')}</tr></thead><tbody>
+      ${arr.map((r) => `<tr data-open="red" data-id="${r.id}"><td title="${h(r.tema)}">${h(r.tema)}</td><td class="mono">${h(r.project)}</td><td>${h(r.subproyecto)}</td><td>${r.ia ? 'IA' : 'Manual'}</td><td>${r.prioridad === 'Alta' ? '<span class="tag bad">Alta</span>' : r.prioridad === 'Baja' ? '<span class="tag">Baja</span>' : 'Normal'}</td>
+        <td>${dlTag(r.fecha_entrega, r.estado === 'Entregada')}</td><td>${pendAS.has(r.id) ? '<span class="tag acc">Por cargar</span>' : '<span class="mute">Al día</span>'}</td><td><select data-act="redestado" data-id="${r.id}">${opts(ESTADOS_RED, r.estado)}</select></td></tr>`).join('') || '<tr><td colspan="8" class="empty">No hay redacciones con estos filtros.</td></tr>'}</tbody></table></div>`,
+  };
+};
 function redForm(r = {}) {
   const ps = projs('RED');
-  return `<div class="sheet"><h2>${r.id ? 'Redacción' : 'Nueva redacción'}</h2><p class="mute small" style="margin:0 0 10px">Mismos campos que pide AppSheet en Carga de Redacciones.</p><form id="redf" data-id="${h(r.id || '')}">
-    <div class="fields">
+  return `<form id="redf" data-id="${h(r.id || '')}"><div class="dh"><h2>${r.id ? 'Redacción' : 'Nueva redacción'}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
+    <div class="db"><p class="small mute" style="margin:0 0 14px">Mismos campos que pide AppSheet en Carga de Redacciones.</p><div class="fields">
       <label class="full">Tema *<input name="tema" required value="${h(r.tema)}"></label>
-      <label>Proyecto<select name="project">${opts(ps.map((q) => q.code), r.project || S.f.redProj || ps[0]?.code)}</select></label>
+      <label>Proyecto<select name="project">${opts(ps.map((q) => q.code), r.project || S.f.redProj || ps[0]?.code, ps.map((q) => `${q.code} · ${q.cliente}`))}</select></label>
       <label>Subproyecto (opcional)<input name="subproyecto" value="${h(r.subproyecto)}"></label>
       <label>Idioma<input name="idioma" value="${h(r.idioma || 'Español')}"></label>
       <label>País<input name="pais" value="${h(r.pais || 'Argentina')}"></label>
@@ -181,12 +200,12 @@ function redForm(r = {}) {
       <label>Redacción IA<select name="ia">${opts(['1', '0'], r.ia === 0 ? '0' : '1', ['Sí', 'No'])}</select></label>
       <label>Estado<select name="estado">${opts(ESTADOS_RED, r.estado || 'Pendiente')}</select></label>
       <label class="full">Notas<textarea name="notas">${h(r.notas)}</textarea></label>
-    </div><div class="err" id="ferr"></div>
-    <div class="actions">${r.id ? '<button type="button" class="btn danger left" data-act="delred">Borrar</button>' : ''}<button type="button" class="btn ghost" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form></div>`;
+    </div><div class="err" id="ferr"></div></div>
+    <div class="df">${r.id ? `<button type="button" class="btn danger left" data-act="del" data-kind="red">Borrar</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
 }
 
-// ---------- Medios (ordenados por mail, sin importar el proyecto) ----------
-function vMedios() {
+// ---------- Medios y contactos ----------
+VIEWS_FN.medios = () => {
   const f = S.f, q = f.medQ.trim().toLowerCase(), key = { mail_eleven: (t) => t.mail_eleven, contacto_medio: (t) => t.contacto_medio, medio: (t) => normDomain(t.medio) }[f.medGroup];
   const groups = new Map();
   for (const t of S.data.lb) {
@@ -194,158 +213,197 @@ function vMedios() {
     const k = key(t) || '(sin dato)'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t);
   }
   const keys = [...groups.keys()].sort((a, b) => (a === '(sin dato)') - (b === '(sin dato)') || a.localeCompare(b));
-  return `<div class="card"><div class="toolbar"><select data-f="medGroup">${opts(['mail_eleven', 'contacto_medio', 'medio'], f.medGroup, ['Agrupar por mail desde el que contacté', 'Agrupar por contacto del medio', 'Agrupar por medio'])}</select>
-    <input type="search" data-f="medQ" placeholder="Buscar mail, medio, anchor…" value="${h(f.medQ)}"></div>
+  const nMedios = new Set(S.data.lb.map((t) => normDomain(t.medio)).filter(Boolean)).size;
+  return {
+    title: 'Medios y contactos', sub: `${nMedios} medios · ${keys.length} grupos`,
+    body: `<div class="toolbar"><select data-f="medGroup">${opts(['mail_eleven', 'contacto_medio', 'medio'], f.medGroup, ['Agrupar por mail desde el que contacté', 'Agrupar por contacto del medio', 'Agrupar por medio'])}</select>${searchBox('medQ', 'Buscar mail, medio, anchor…')}</div>
+    <div class="card tblwrap"><table class="tbl"><thead><tr><th>Medio</th><th>Proyecto</th><th>Código</th><th>Anchor</th>${f.medGroup !== 'mail_eleven' ? '<th>Contacté desde</th>' : ''}${f.medGroup !== 'contacto_medio' ? '<th>Contacto del medio</th>' : ''}<th>Negociación</th><th class="num">Precio</th><th>Estado</th></tr></thead><tbody>
     ${keys.map((k) => { const arr = groups.get(k), ps = [...new Set(arr.map((t) => t.project))];
-      return `<div class="group"><div class="gh"><span class="grow">${h(k)}</span><span class="pill gray">${arr.length} · ${h(ps.join(', '))}</span>${k.includes('@') ? `<button class="btn sm ghost" data-act="copy" data-v="${h(k)}">Copiar</button>` : ''}</div>
-        ${arr.map((t) => `<div class="item" data-act="open" data-kind="lb" data-id="${t.id}"><div><div class="main">${h(normDomain(t.medio) || '(sin medio)')} <span class="mute small">· ${h(t.project)}</span></div><div class="meta">${t.as_code ? `<span>${h(t.as_code)}</span>` : ''}<span>${h(t.anchor)}</span>${f.medGroup !== 'mail_eleven' && t.mail_eleven ? `<span>✉️ ${h(t.mail_eleven)}</span>` : ''}${f.medGroup !== 'contacto_medio' && t.contacto_medio ? `<span>👤 ${h(t.contacto_medio)}</span>` : ''}</div></div>
-          <div class="side"><span class="pill ${PUBLICADOS.has(t.estado) ? 'ok' : ''}">${h(t.estado)}</span>${t.estado_neg ? `<span class="small mute">${h(t.estado_neg)}</span>` : ''}</div></div>`).join('')}</div>`; }).join('') || '<div class="empty">Todavía no hay medios cargados.</div>'}</div>`;
-}
+      return `<tr class="grp"><td colspan="9"><span>${h(k)}</span> <span class="mute" style="font-weight:400">· ${arr.length} tarea${arr.length > 1 ? 's' : ''} · ${h(ps.join(', '))}</span>${k.includes('@') ? ` <button class="lnk small" data-act="copy" data-v="${h(k)}" style="margin-left:8px">Copiar mail</button>` : ''}</td></tr>` +
+        arr.map((t) => `<tr data-open="lb" data-id="${t.id}"><td>${h(normDomain(t.medio)) || '<span class="mute">—</span>'}</td><td class="mono">${h(t.project)}</td><td class="mono">${h(t.as_code)}</td><td>${h(t.anchor)}</td>${f.medGroup !== 'mail_eleven' ? `<td>${h(t.mail_eleven)}</td>` : ''}${f.medGroup !== 'contacto_medio' ? `<td>${h(t.contacto_medio)}</td>` : ''}<td>${h(t.estado_neg)}</td><td class="num nowrap">${t.precio != null ? `${h(t.moneda)} ${fmtN(t.precio)}` : ''}</td><td>${estadoBadge(t.estado)}</td></tr>`).join(''); }).join('') || '<tr><td colspan="9" class="empty">Todavía no hay medios cargados.</td></tr>'}</tbody></table></div>`,
+  };
+};
 
 // ---------- Horas ----------
-function vHoras() {
+VIEWS_FN.horas = () => {
   const mes = S.f.mes, plan = S.data.plan.filter((p) => p.month === mes), hrs = S.data.hours.filter((x) => x.date.startsWith(mes));
   const filas = new Map();
   for (const p of plan) filas.set(p.project + '|' + p.task_type, { project: p.project, task_type: p.task_type, ph: p.hours, pu: p.units, rh: 0 });
   for (const x of hrs) { const k = x.project + '|' + x.task_type; if (!filas.has(k)) filas.set(k, { project: x.project, task_type: x.task_type, ph: 0, pu: 0, rh: 0 }); filas.get(k).rh += x.hours; }
-  const porProj = new Map(); for (const r of filas.values()) { if (!porProj.has(r.project)) porProj.set(r.project, []); porProj.get(r.project).push(r); }
-  const hechas = (code) => { const p = proj(code); if (!p) return 0; return p.tipo === 'LIN' ? S.data.lb.filter((t) => t.project === code && t.publicado && t.publicado.startsWith(mes)).length : S.data.red.filter((r) => r.project === code && r.entregada && r.entregada.startsWith(mes)).length; };
-  const bar = (r, p) => `<div class="bar"><i class="${p > 0 && r > p ? 'over' : ''}" style="width:${p > 0 ? Math.min(100, (r / p) * 100) : r > 0 ? 100 : 0}%"></i></div>`;
   let totPh = 0, totRh = 0, body = '';
   for (const p of S.data.projects) {
-    const rows = porProj.get(p.code); if (!rows) continue;
+    const rows = [...filas.values()].filter((r) => r.project === p.code && (r.ph > 0 || r.rh > 0 || r.pu > 0)); if (!rows.length) continue;
     const ph = rows.reduce((a, r) => a + r.ph, 0), rh = rows.reduce((a, r) => a + r.rh, 0), pu = rows.reduce((a, r) => a + r.pu, 0); totPh += ph; totRh += rh;
-    body += `<tr class="sub"><td>${h(p.code)} <span class="mute small">${h(p.cliente)}</span></td><td></td><td class="num">${fmtH(ph)}</td><td class="num">${fmtH(rh)}</td><td>${bar(rh, ph)}</td><td class="num">${hechas(p.code)} / ${pu}</td></tr>`;
-    body += rows.map((r) => `<tr><td></td><td>${h(r.task_type)}</td><td class="num">${fmtH(r.ph)}</td><td class="num">${fmtH(r.rh)}</td><td>${bar(r.rh, r.ph)}</td><td class="num mute">${r.pu || ''}</td></tr>`).join('');
+    body += `<tr class="grp"><td><span class="mono">${h(p.code)}</span> <span class="mute" style="font-weight:400">${h(p.cliente)}</span></td><td></td><td class="num">${fmtN(ph)}</td><td class="num">${fmtN(rh)}</td><td>${bar(rh, ph)}</td><td class="num">${ph ? Math.round((rh / ph) * 100) + '%' : ''}</td><td class="num">${hechas(p, mes)} / ${pu}</td></tr>`;
+    body += rows.map((r) => `<tr><td></td><td>${h(r.task_type)}</td><td class="num">${fmtN(r.ph)}</td><td class="num">${fmtN(r.rh)}</td><td>${bar(r.rh, r.ph)}</td><td class="num mute">${r.ph ? Math.round((r.rh / r.ph) * 100) + '%' : ''}</td><td class="num mute">${r.pu || ''}</td></tr>`).join('');
   }
-  return `<div class="card"><div class="toolbar"><input type="month" data-f="mes" value="${h(mes)}" style="width:auto"><span class="grow"></span><button class="btn ghost" data-act="editplan">Editar plan del mes</button><button class="btn" data-act="newhours">+ Cargar horas</button></div>
-    <div class="row wrap" style="gap:24px;margin-bottom:8px"><div class="stat"><span class="mute small">Planificadas</span><span class="big">${fmtH(totPh)} h</span></div><div class="stat"><span class="mute small">Cargadas</span><span class="big">${fmtH(totRh)} h</span></div><div class="stat"><span class="mute small">Avance</span><span class="big">${totPh ? Math.round((totRh / totPh) * 100) : 0}%</span></div></div>
-    <div class="tscroll"><table><thead><tr><th>Proyecto</th><th>Tarea</th><th class="num">Plan h</th><th class="num">Real h</th><th></th><th class="num">Hechas / plan u.</th></tr></thead><tbody>${body || '<tr><td colspan="6" class="empty">Sin plan ni horas este mes.</td></tr>'}</tbody></table></div>
-    <p class="mute small">Unidades hechas: links pasados a Publicado o Cerrado y redacciones Entregadas en el mes.</p></div>
-    <div class="card"><h2>Registro del mes</h2><div class="list">${hrs.map(hourItem).join('') || '<div class="empty">Sin horas cargadas.</div>'}</div></div>`;
-}
+  return {
+    title: 'Horas', sub: `${mesLargo(mes)} · ${fmtN(totRh)} de ${fmtN(totPh)} h planificadas (${totPh ? Math.round((totRh / totPh) * 100) : 0}%)`,
+    actions: `<input type="month" data-f="mes" value="${h(mes)}" style="width:auto"><button class="btn sec" data-act="editplan">Editar plan del mes</button><button class="btn" data-act="newhours">${ic('plus')}Cargar horas</button>`,
+    body: `<div class="card"><table class="tbl"><thead><tr><th>Proyecto</th><th>Tarea</th><th class="num">Plan (h)</th><th class="num">Real (h)</th><th></th><th class="num">Avance</th><th class="num">Unidades hechas / plan</th></tr></thead><tbody>${body || '<tr><td colspan="7" class="empty">Sin plan ni horas en este mes.</td></tr>'}</tbody></table></div>
+    <p class="small mute">Unidades hechas: links que pasaron a Publicado o Cerrado y redacciones Entregadas dentro del mes.</p>
+    <div class="card" style="margin-top:20px"><div class="ch"><h2>Registro</h2><span class="sub">${hrs.length} carga${hrs.length === 1 ? '' : 's'}</span></div><table class="tbl"><thead><tr><th>Fecha</th><th>Proyecto</th><th>Tarea</th><th>Nota</th><th class="num">Horas</th></tr></thead><tbody>
+      ${hrs.map((x) => `<tr data-open="hours" data-id="${x.id}"><td>${fmtD(x.date)}</td><td class="mono">${h(x.project)}</td><td>${h(x.task_type)}</td><td class="mute">${h(x.note)}</td><td class="num">${fmtN(x.hours)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin horas cargadas.</td></tr>'}</tbody></table></div>`,
+  };
+};
 function hoursForm(x = {}) {
   const ps = projs(), p = x.project || ps[0]?.code;
-  return `<div class="sheet"><h2>${x.id ? 'Editar horas' : 'Cargar horas'}</h2><form id="hrf" data-id="${h(x.id || '')}"><div class="fields">
-    <label>Fecha<input type="date" name="date" value="${h(x.date || hoy())}"></label><label>Horas<input type="number" name="hours" step="0.25" min="0.25" max="24" required value="${h(x.hours)}"></label>
-    <label>Proyecto<select name="project" data-act="hrproj">${opts(ps.map((q) => q.code), p)}</select></label><label>Tarea<select name="task_type">${opts(TAREAS[proj(p)?.tipo || 'LIN'], x.task_type)}</select></label>
-    <label class="full">Nota<input name="note" value="${h(x.note)}"></label></div><div class="err" id="ferr"></div>
-    <div class="actions">${x.id ? '<button type="button" class="btn danger left" data-act="delhours">Borrar</button>' : ''}<button type="button" class="btn ghost" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form></div>`;
+  return `<form id="hrf" data-id="${h(x.id || '')}"><div class="dh"><h2>${x.id ? 'Editar horas' : 'Cargar horas'}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
+    <div class="db"><div class="fields"><label>Fecha<input type="date" name="date" value="${h(x.date || hoy())}"></label><label>Horas<input type="number" name="hours" step="0.25" min="0.25" max="24" required value="${h(x.hours)}" placeholder="1,5"></label>
+    <label>Proyecto<select name="project" data-act="hrproj">${opts(ps.map((q) => q.code), p, ps.map((q) => `${q.code} · ${q.cliente}`))}</select></label><label>Tarea<select name="task_type">${opts(TAREAS[proj(p)?.tipo || 'LIN'], x.task_type)}</select></label>
+    <label class="full">Nota<input name="note" value="${h(x.note)}"></label></div><div class="err" id="ferr"></div></div>
+    <div class="df">${x.id ? `<button type="button" class="btn danger left" data-act="del" data-kind="hours">Borrar</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
 }
 function planForm() {
   const mes = S.f.mes, plan = S.data.plan.filter((p) => p.month === mes), get = (c, t) => plan.find((p) => p.project === c && p.task_type === t) || {};
   const rows = projs().flatMap((p) => TAREAS[p.tipo].map((t) => ({ c: p.code, t, ...get(p.code, t) })));
-  return `<div class="sheet"><h2>Plan de ${h(mes)}</h2><form id="planf"><div class="tscroll"><table><thead><tr><th>Proyecto</th><th>Tarea</th><th class="num">Horas</th><th class="num">Unidades</th></tr></thead><tbody>
-    ${rows.map((r, i) => `<tr><td>${h(r.c)}</td><td>${h(r.t)}<input type="hidden" name="p${i}" value="${h(r.c)}|${h(r.t)}"></td><td><input type="number" step="0.01" min="0" name="h${i}" value="${r.hours || ''}" style="width:90px"></td><td><input type="number" step="1" min="0" name="u${i}" value="${r.units || ''}" style="width:80px"></td></tr>`).join('')}
-    </tbody></table></div><div class="err" id="ferr"></div><div class="actions"><button type="button" class="btn ghost" data-act="close">Cancelar</button><button class="btn">Guardar plan</button></div></form></div>`;
+  return `<form id="planf"><div class="dh"><h2>Plan de ${mesLargo(mes)}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
+    <div class="db" style="padding:0"><table class="tbl"><thead><tr><th>Proyecto</th><th>Tarea</th><th class="num">Horas</th><th class="num">Unidades</th></tr></thead><tbody>
+    ${rows.map((r, i) => `<tr><td class="mono">${h(r.c)}</td><td>${h(r.t)}<input type="hidden" name="p${i}" value="${h(r.c)}|${h(r.t)}"></td><td><input type="number" step="0.01" min="0" name="h${i}" value="${r.hours || ''}" style="width:90px;height:30px"></td><td><input type="number" step="1" min="0" name="u${i}" value="${r.units || ''}" style="width:80px;height:30px"></td></tr>`).join('')}
+    </tbody></table><div class="err" id="ferr" style="padding:0 20px"></div></div><div class="df"><span class="left"></span><button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar plan</button></div></form>`;
 }
+
+// ---------- Proyectos ----------
+VIEWS_FN.proyectos = () => ({
+  title: 'Proyectos', sub: 'Proyectos habilitados en AppSheet y los topes que valida cada uno',
+  actions: `<button class="btn" data-act="saveproj">Guardar cambios</button>`,
+  body: `<form id="projf"><div class="card"><table class="tbl"><thead><tr><th>Activo</th><th>Proyecto</th><th>Cliente</th><th>Dominio</th><th>Países</th><th class="num">DR mín.</th><th class="num">Tráfico mín.</th><th class="num">USD máx.</th><th class="num">Repetir (días)</th><th class="num">Palabras</th></tr></thead><tbody>
+    ${S.data.projects.map((p) => `<tr data-code="${h(p.code)}"><td><input type="checkbox" name="active" ${p.active ? 'checked' : ''}></td><td class="mono">${h(p.code)}</td><td><input name="cliente" value="${h(p.cliente)}" style="width:120px;height:30px"></td>
+      ${p.tipo === 'LIN' ? `<td><input name="dominio" value="${h(p.params.dominio)}" style="width:150px;height:30px"></td><td><input name="paises" value="${h(p.params.paises)}" style="width:130px;height:30px"></td>${['drMin', 'trafMin', 'precioMaxUSD', 'repDias', 'palabrasMin'].map((k) => `<td class="num"><input type="number" step="any" name="${k}" value="${h(p.params[k] ?? '')}" style="width:66px;height:30px;text-align:right"></td>`).join('')}<input type="hidden" name="servicio" value="${h(p.params.servicio)}">` : '<td colspan="7" class="mute">Proyecto de redacción</td>'}</tr>`).join('')}
+    </tbody></table></div></form><p class="small mute">Valores tomados de "Parámetros del Proyecto" en AppSheet el 20/11/2026. Un campo vacío no se controla.</p>`,
+});
+
+// ---------- Pendientes AppSheet ----------
+VIEWS_FN.appsheet = () => {
+  const pend = S.data.as_pend;
+  return {
+    title: 'Pendientes AppSheet', sub: 'Cambios hechos acá que todavía hay que reflejar en Eleven - Operaciones',
+    actions: pend.length ? `<button class="btn sec" data-act="asall">Seleccionar todos</button><button class="btn" data-act="asdone">Marcar como reflejados</button>` : '',
+    body: `<div class="card">${pend.length ? `<table class="tbl"><thead><tr><th style="width:36px"></th><th>Fecha</th><th>Tipo</th><th>Tarea</th><th>Cambio</th></tr></thead><tbody>
+      ${pend.map((a) => `<tr><td><input type="checkbox" class="asck" value="${a.id}"></td><td class="nowrap">${new Date(a.at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${a.entity === 'lb' ? 'Link' : 'Redacción'}</td><td class="mono">${h(a.label)}</td><td class="wrap">${h(a.change)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Todo al día: no hay cambios pendientes.</div>'}</div>`,
+  };
+};
 
 // ---------- Ajustes ----------
-function vAjustes() {
-  const st = S.data.settings, pend = S.data.as_pend;
-  return `<div class="grid two"><div>
-    <div class="card"><h2>🔁 Cambios para reflejar en AppSheet (${pend.length})</h2>
-      <p class="mute small" style="margin-top:0">Cada cambio que hacés acá queda anotado. Cuando esté en AppSheet, marcalo como hecho.</p>
-      ${pend.length ? `<div class="list">${pend.map((a) => `<label class="item" style="grid-template-columns:auto 1fr;cursor:default"><input type="checkbox" class="asck" value="${a.id}"><div><div class="main" style="color:var(--ink)">${h(a.label)}</div><div class="meta">${h(a.change)} · ${new Date(a.at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</div></div></label>`).join('')}</div>
-      <div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="asall">Marcar todos</button><button class="btn sm" data-act="asdone">Marcar seleccionados como hechos</button></div>` : '<div class="empty">Nada pendiente.</div>'}</div>
-    <div class="card"><h2>📁 Proyectos y parámetros</h2><p class="mute small" style="margin-top:0">Los topes que valida AppSheet. Si un campo queda vacío, no se controla.</p><form id="projf"><div class="tscroll"><table><thead><tr><th>Activo</th><th>Proyecto</th><th>Cliente</th><th class="num">DR mín.</th><th class="num">Tráfico mín.</th><th class="num">USD máx.</th><th class="num">Repetir medio (días)</th></tr></thead><tbody>
-      ${S.data.projects.map((p) => `<tr data-code="${h(p.code)}"><td><input type="checkbox" name="active" ${p.active ? 'checked' : ''}></td><td>${h(p.code)}</td><td><input name="cliente" value="${h(p.cliente)}" style="width:130px"></td>${p.tipo === 'LIN' ? ['drMin', 'trafMin', 'precioMaxUSD', 'repDias'].map((k) => `<td><input type="number" step="any" name="${k}" value="${h(p.params[k] ?? '')}" style="width:80px"></td>`).join('') : '<td colspan="4" class="mute small">Redacción</td>'}</tr>`).join('')}
-      </tbody></table></div><button class="btn sm" style="margin-top:8px">Guardar proyectos</button></form></div>
-  </div><div>
-    <div class="card"><h2>📅 Google Calendar</h2><p class="mute small" style="margin-top:0">Tus deadlines (tareas de LB y redacciones sin terminar) como calendario. Google lo actualiza solo, pero puede tardar varias horas.</p>
+VIEWS_FN.ajustes = () => {
+  const st = S.data.settings;
+  return {
+    title: 'Ajustes',
+    body: `<div class="cols c11" style="margin-top:0"><div class="card"><div class="ch"><h2>Google Calendar</h2></div><div class="cb">
+      <p class="mute" style="margin-top:0">Tus deadlines (tareas de LB y redacciones sin terminar) como calendario de solo lectura. Google lo actualiza solo, aunque puede tardar varias horas.</p>
       <code class="url" id="calurl">${h(S.calurl || 'Cargando…')}</code>
-      <ol class="steps small"><li>Copiá el link.</li><li>En Google Calendar (compu): <b>Otros calendarios → + → Desde URL</b>.</li><li>Pegalo y tocá <b>Agregar calendario</b>.</li></ol>
-      <div class="row"><button class="btn sm" data-act="copycal">Copiar link</button><button class="btn sm ghost" data-act="resetcal">Generar link nuevo</button></div></div>
-    <div class="card"><h2>🔔 Avisos</h2><label class="row" style="color:var(--ink);font-weight:400"><input type="checkbox" id="avisos" ${st.avisos === '1' ? 'checked' : ''}> Avisos activados</label>
-      <div class="fields" style="margin-top:8px"><label>Resumen de deadlines a las<select id="aviso_hora">${opts([...Array(15)].map((_, i) => String(i + 7)), st.aviso_hora, [...Array(15)].map((_, i) => `${i + 7}:00`))}</select></label>
-      <label>Si no cargaste horas, avisar a las<select id="horas_hora">${opts([...Array(8)].map((_, i) => String(i + 15)), st.horas_hora, [...Array(8)].map((_, i) => `${i + 15}:00`))}</select></label></div>
-      <div class="row wrap" style="margin-top:10px"><button class="btn sm" data-act="saveavisos">Guardar</button><button class="btn sm ghost" data-act="push">Activar en este dispositivo</button><button class="btn sm ghost" data-act="pushtest">Probar</button></div>
-      <p class="mute small" id="pushmsg">En iPhone, primero agregá la app a la pantalla de inicio (Compartir → Agregar a inicio) y activalos desde ahí.</p></div>
-    <div class="card"><h2>Cuenta</h2><div class="row wrap"><button class="btn sm ghost" data-act="export">Descargar mis datos (JSON)</button><button class="btn sm ghost" data-act="logout">Cerrar sesión</button></div></div>
-  </div></div>`;
-}
+      <ol class="steps"><li>Copiá el link.</li><li>En Google Calendar: <b>Otros calendarios → + → Desde URL</b>.</li><li>Pegalo y elegí <b>Agregar calendario</b>.</li></ol>
+      <div style="display:flex;gap:8px"><button class="btn sm" data-act="copycal">${ic('copy')}Copiar link</button><button class="btn sm sec" data-act="resetcal">Generar link nuevo</button></div></div></div>
+    <div class="card"><div class="ch"><h2>Avisos de escritorio</h2></div><div class="cb">
+      <label class="check"><input type="checkbox" id="avisos" ${st.avisos === '1' ? 'checked' : ''}> Avisos activados</label>
+      <div class="fields" style="margin-top:14px"><label>Resumen de deadlines a las<select id="aviso_hora">${opts([...Array(15)].map((_, i) => String(i + 7)), st.aviso_hora, [...Array(15)].map((_, i) => `${i + 7}:00`))}</select></label>
+      <label>Si no cargaste horas (lun a vie), avisar a las<select id="horas_hora">${opts([...Array(8)].map((_, i) => String(i + 15)), st.horas_hora, [...Array(8)].map((_, i) => `${i + 15}:00`))}</select></label></div>
+      <div style="display:flex;gap:8px;margin-top:14px"><button class="btn sm" data-act="saveavisos">Guardar</button><button class="btn sm sec" data-act="push">Activar en esta computadora</button><button class="btn sm sec" data-act="pushtest">Enviar prueba</button></div>
+      <p class="small mute" id="pushmsg">Los avisos llegan como notificaciones de Windows aunque la app esté cerrada (Chrome o Edge tienen que estar abiertos en segundo plano).</p></div></div>
+    <div class="card"><div class="ch"><h2>Instalar como app de escritorio</h2></div><div class="cb">
+      <ol class="steps" style="margin-top:0"><li>Abrí esta página en <b>Chrome</b> o <b>Edge</b>.</li><li>En la barra de direcciones, tocá el ícono de <b>Instalar</b> (o menú ⋮ → <b>Transmitir, guardar y compartir → Instalar página como app</b>).</li><li>Queda con su propia ventana, ícono en la barra de tareas y en el menú Inicio. Clic derecho en el ícono: accesos directos a nueva tarea y cargar horas.</li></ol></div></div>
+    <div class="card"><div class="ch"><h2>Cuenta y datos</h2></div><div class="cb" style="display:flex;gap:8px"><button class="btn sm sec" data-act="export">Descargar mis datos (JSON)</button><button class="btn sm sec" data-act="logout">Cerrar sesión</button></div></div></div>`,
+  };
+};
 
-// ---------- modales ----------
-function openModal(html) { $('#modal').innerHTML = html; lbAvisosVivos(); const first = $('#modal input:not([type=hidden]), #modal select'); if (first && matchMedia('(min-width:700px)').matches) first.focus(); }
-function closeModal() { $('#modal').innerHTML = ''; }
+// ---------- cronómetro (guardado en el servidor) ----------
+const timer = () => { try { return JSON.parse(S.data.settings.timer || 'null'); } catch { return null; } };
+function renderTimer() {
+  const el = $('#sidetimer'); if (!el) return; const tm = timer(), ps = projs();
+  el.innerHTML = tm ? `<div class="lbl"><span class="run"></span>Cronómetro</div><div class="small"><b class="mono">${h(tm.project)}</b></div><div class="small mute">${h(tm.task_type)}</div><div class="clock" id="tclock">0:00:00</div>
+      <div style="display:flex;gap:6px"><button class="btn sm" data-act="tstop" style="flex:1;justify-content:center">${ic('stop')}Guardar</button><button class="btn sm sec" data-act="tdiscard">Descartar</button></div>`
+    : `<div class="lbl">Cronómetro</div><select id="tproj" data-act="tproj" style="height:30px;font-size:12.5px">${opts(ps.map((p) => p.code), S.tproj || ps[0]?.code)}</select>
+      <select id="ttype" style="height:30px;font-size:12.5px">${opts(TAREAS[proj(S.tproj || ps[0]?.code)?.tipo || 'LIN'], S.ttype)}</select><button class="btn sm full" data-act="tstart">${ic('play')}Iniciar</button>`;
+  clearInterval(renderTimer.i); if (!tm) return;
+  const up = () => { const c = $('#tclock'); if (!c) return; const s = Math.max(0, Math.floor((Date.now() - tm.start) / 1000)); c.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; document.title = `${c.textContent} · ${tm.project}`; };
+  up(); renderTimer.i = setInterval(up, 1000);
+}
+async function setTimer(v) { await api('/api/settings', 'POST', { timer: v ? JSON.stringify(v) : '' }); S.data.settings.timer = v ? JSON.stringify(v) : ''; if (!v) document.title = 'Proyectos Eleven'; }
+
+// ---------- panel lateral ----------
+function openDrawer(html) { const d = $('#drawer'); d.querySelector('.panel').innerHTML = html; d.classList.add('open'); lbAvisosVivos(); setTimeout(() => d.querySelector('.db input:not([type=hidden]), .db select')?.focus(), 60); }
+function closeDrawer() { $('#drawer').classList.remove('open'); }
 const formData = (f) => Object.fromEntries(new FormData(f));
-async function guardar(fn) { const e = $('#ferr'); try { if (e) e.textContent = ''; await fn(); closeModal(); await load(); } catch (err) { if (e) e.textContent = err.message; else hint(err.message); } }
+async function guardar(fn, msg) { const e = $('#ferr'); try { if (e) e.textContent = ''; await fn(); closeDrawer(); if (msg) toast(msg); await load(); } catch (err) { if (e) e.textContent = err.message; else toast(err.message); } }
 
 // ---------- eventos ----------
 document.addEventListener('click', async (ev) => {
-  const el = ev.target.closest('[data-act]'); if (!el) { if (ev.target.id === 'modal') closeModal(); return; }
-  const act = el.dataset.act; if (el.tagName === 'SELECT') return;
-  const byId = (arr) => S.data[arr].find((x) => x.id === el.dataset.id);
-  switch (act) {
-    case 'tab': S.tab = el.dataset.v; localStorage.setItem('pe_tab', S.tab); if (S.tab === 'ajustes') loadCal(); render(); scrollTo(0, 0); break;
-    case 'open': if (ev.target.closest('select')) return; openModal(el.dataset.kind === 'lb' ? lbForm(byId('lb')) : redForm(byId('red'))); break;
-    case 'newlb': openModal(lbForm()); break;
-    case 'newred': openModal(redForm()); break;
-    case 'newhours': openModal(hoursForm()); break;
-    case 'edithours': openModal(hoursForm(byId('hours'))); break;
-    case 'editplan': openModal(planForm()); break;
-    case 'close': closeModal(); break;
-    case 'dellb': case 'delred': case 'delhours': {
-      const f = el.closest('form'), what = { dellb: 'lb', delred: 'red', delhours: 'hours' }[act];
-      if (confirm('¿Borrar? No se puede deshacer.')) guardar(() => api(`/api/${what}/${f.dataset.id}`, 'DELETE')); break;
-    }
-    case 'tstart': { const p = $('#tproj').value, t = $('#ttype').value; try { await setTimer({ project: p, task_type: t, start: Date.now() }); render(); } catch (e) { hint(e.message); } break; }
+  if (ev.target.classList.contains('scrim')) return closeDrawer();
+  const sortTh = ev.target.closest('th[data-sort]');
+  if (sortTh) { const v = sortTh.dataset.sv, k = sortTh.dataset.sort, cur = S.sort[v]; S.sort[v] = [k, cur[0] === k ? -cur[1] : 1]; return render(); }
+  const row = ev.target.closest('tr[data-open]');
+  if (row && !ev.target.closest('select,button,input')) { const k = row.dataset.open, x = S.data[k].find((o) => o.id === row.dataset.id); return openDrawer({ lb: lbForm, red: redForm, hours: hoursForm }[k](x)); }
+  const el = ev.target.closest('[data-act]'); if (!el || el.tagName === 'SELECT') return;
+  switch (el.dataset.act) {
+    case 'view': S.view = el.dataset.v; localStorage.setItem('pe_view', S.view); if (S.view === 'ajustes') loadCal(); $('#view') && ($('#view').scrollTop = 0); render(); break;
+    case 'newlb': openDrawer(lbForm()); break;
+    case 'newred': openDrawer(redForm()); break;
+    case 'newhours': openDrawer(hoursForm()); break;
+    case 'editplan': openDrawer(planForm()); break;
+    case 'close': closeDrawer(); break;
+    case 'del': { const f = el.closest('form'), k = el.dataset.kind; if (confirm('¿Borrar? No se puede deshacer.')) guardar(() => api(`/api/${k}/${f.dataset.id}`, 'DELETE'), 'Borrado'); break; }
+    case 'tstart': try { S.ttype = $('#ttype').value; await setTimer({ project: $('#tproj').value, task_type: $('#ttype').value, start: Date.now() }); renderTimer(); } catch (e) { toast(e.message); } break;
     case 'tstop': {
       const tm = timer(), hrs = Math.round(((Date.now() - tm.start) / 3600000) * 100) / 100;
-      if (hrs < 0.01) { await setTimer(null); render(); break; }
-      try { await api('/api/hours', 'POST', { project: tm.project, task_type: tm.task_type, hours: Math.min(hrs, 24), date: hoy(), note: 'Cronómetro' }); await setTimer(null); hint(`Guardadas ${fmtH(hrs)} h`); await load(); } catch (e) { hint(e.message); }
+      if (hrs < 0.01) { await setTimer(null); renderTimer(); break; }
+      try { await api('/api/hours', 'POST', { project: tm.project, task_type: tm.task_type, hours: Math.min(hrs, 24), date: hoy(), note: 'Cronómetro' }); await setTimer(null); toast(`Se guardaron ${fmtN(hrs)} h en ${tm.project}`); await load(); } catch (e) { toast(e.message); }
       break;
     }
-    case 'tdiscard': if (confirm('¿Descartar el tiempo del cronómetro?')) { await setTimer(null); render(); } break;
-    case 'copy': navigator.clipboard?.writeText(el.dataset.v).then(() => hint('Copiado')); break;
-    case 'copycal': navigator.clipboard?.writeText(S.calurl || '').then(() => hint('Link copiado')); break;
+    case 'tdiscard': if (confirm('¿Descartar el tiempo del cronómetro?')) { await setTimer(null); renderTimer(); } break;
+    case 'copy': navigator.clipboard?.writeText(el.dataset.v).then(() => toast('Mail copiado')); break;
+    case 'copycal': navigator.clipboard?.writeText(S.calurl || '').then(() => toast('Link copiado')); break;
     case 'resetcal': if (confirm('El link anterior deja de funcionar y vas a tener que volver a agregarlo en Google Calendar. ¿Seguir?')) { S.calurl = (await api('/api/calendar/reset', 'POST')).url; render(); } break;
     case 'asall': document.querySelectorAll('.asck').forEach((c) => { c.checked = true; }); break;
-    case 'asdone': { const ids = [...document.querySelectorAll('.asck:checked')].map((c) => Number(c.value)); if (!ids.length) return hint('Elegí al menos uno'); await api('/api/as/done', 'POST', { ids }); await load(); break; }
-    case 'saveavisos': await api('/api/settings', 'POST', { avisos: $('#avisos').checked ? '1' : '0', aviso_hora: $('#aviso_hora').value, horas_hora: $('#horas_hora').value }); hint('Guardado'); await load(); break;
+    case 'asdone': { const ids = [...document.querySelectorAll('.asck:checked')].map((c) => Number(c.value)); if (!ids.length) return toast('Seleccioná al menos un cambio'); await api('/api/as/done', 'POST', { ids }); toast('Marcados como reflejados'); await load(); break; }
+    case 'saveproj': $('#projf')?.requestSubmit(); break;
+    case 'saveavisos': await api('/api/settings', 'POST', { avisos: $('#avisos').checked ? '1' : '0', aviso_hora: $('#aviso_hora').value, horas_hora: $('#horas_hora').value }); toast('Avisos guardados'); await load(); break;
     case 'push': enablePush(); break;
-    case 'pushtest': { const r = await api('/api/push/test', 'POST'); $('#pushmsg').textContent = r.delivered ? 'Aviso enviado ✔' : 'No hay dispositivos con avisos activados.'; break; }
+    case 'pushtest': { const r = await api('/api/push/test', 'POST'); $('#pushmsg').textContent = r.delivered ? 'Aviso de prueba enviado.' : 'Todavía no activaste los avisos en ninguna computadora.'; break; }
     case 'export': { const d = await api('/api/export'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })); a.download = `proyectos-eleven-${hoy()}.json`; a.click(); break; }
     case 'logout': await api('/api/logout', 'POST').catch(() => {}); S.token = ''; localStorage.removeItem('pe_token'); render(); break;
   }
 });
 document.addEventListener('change', async (ev) => {
   const el = ev.target;
-  if (el.dataset.f) { S.f[el.dataset.f] = el.value; render(); return; }
+  if (el.dataset.f && el.type !== 'search') { S.f[el.dataset.f] = el.value; render(); return; }
   if (el.dataset.act === 'lbestado' || el.dataset.act === 'redestado') {
     const kind = el.dataset.act === 'lbestado' ? 'lb' : 'red', x = S.data[kind].find((o) => o.id === el.dataset.id);
-    try { await api('/api/' + kind, 'POST', { ...x, estado: el.value }); hint('Estado actualizado · anotado para AppSheet'); await load(); } catch (e) { hint(e.message); el.value = x.estado; }
+    try { await api('/api/' + kind, 'POST', { ...x, estado: el.value }); toast('Estado actualizado · anotado en Pendientes AppSheet'); await load(); } catch (e) { toast(e.message); el.value = x.estado; }
     return;
   }
   if (el.dataset.act === 'tproj') { S.tproj = el.value; $('#ttype').innerHTML = opts(TAREAS[proj(el.value).tipo]); return; }
   if (el.dataset.act === 'hrproj') { el.form.task_type.innerHTML = opts(TAREAS[proj(el.value).tipo]); return; }
+  if (el.dataset.act === 'lbproj') { const pp = proj(el.value)?.params || {}; if (pp.servicio) el.form.tipo_servicio.value = pp.servicio; }
   if (el.closest('#lbf')) lbAvisosVivos();
 });
 document.addEventListener('input', (ev) => {
   const el = ev.target;
-  if (el.dataset.f && el.type === 'search') { S.f[el.dataset.f] = el.value; clearTimeout(S.qt); S.qt = setTimeout(() => { const pos = el.selectionStart; render(); const n = document.querySelector(`[data-f="${el.dataset.f}"]`); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 250); return; }
+  if (el.dataset.f && el.type === 'search') { S.f[el.dataset.f] = el.value; clearTimeout(S.qt); S.qt = setTimeout(() => { const pos = el.selectionStart; render(); const n = document.querySelector(`[data-f="${el.dataset.f}"]`); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 200); return; }
   if (el.closest('#lbf')) lbAvisosVivos();
 });
 document.addEventListener('submit', async (ev) => {
   ev.preventDefault(); const f = ev.target;
   if (f.id === 'loginf') {
-    try { const r = await api(S.setup ? '/api/setup' : '/api/login', 'POST', { password: f.pw.value }); S.token = r.token; localStorage.setItem('pe_token', r.token); S.setup = false; await load(); }
+    try { const r = await api(S.setup ? '/api/setup' : '/api/login', 'POST', { password: f.pw.value }); S.token = r.token; localStorage.setItem('pe_token', r.token); S.setup = false; $('#app').innerHTML = ''; await load(); }
     catch (e) { $('#lerr').textContent = e.message; }
     return;
   }
-  if (f.id === 'lbf') return guardar(() => api('/api/lb', 'POST', { ...formData(f), id: f.dataset.id || undefined }));
-  if (f.id === 'redf') return guardar(() => { const d = formData(f); return api('/api/red', 'POST', { ...d, ia: d.ia === '1', id: f.dataset.id || undefined }); });
-  if (f.id === 'hrf') return guardar(() => api('/api/hours', 'POST', { ...formData(f), id: f.dataset.id || undefined }));
+  if (f.id === 'lbf') return guardar(() => api('/api/lb', 'POST', { ...formData(f), id: f.dataset.id || undefined }), 'Tarea guardada');
+  if (f.id === 'redf') return guardar(() => { const d = formData(f); return api('/api/red', 'POST', { ...d, ia: d.ia === '1', id: f.dataset.id || undefined }); }, 'Redacción guardada');
+  if (f.id === 'hrf') return guardar(() => api('/api/hours', 'POST', { ...formData(f), id: f.dataset.id || undefined }), 'Horas guardadas');
   if (f.id === 'planf') {
-    const d = formData(f), rows = Object.keys(d).filter((k) => k.startsWith('p')).map((k) => { const i = k.slice(1), [project, task_type] = d[k].split('|'); return { project, task_type, hours: d['h' + i], units: d['u' + i] }; });
-    return guardar(() => api('/api/plan', 'POST', { month: S.f.mes, rows }));
+    const d = formData(f), rows = Object.keys(d).filter((k) => /^p\d+$/.test(k)).map((k) => { const i = k.slice(1), [project, task_type] = d[k].split('|'); return { project, task_type, hours: d['h' + i], units: d['u' + i] }; });
+    return guardar(() => api('/api/plan', 'POST', { month: S.f.mes, rows }), 'Plan guardado');
   }
   if (f.id === 'projf') {
-    const projects = [...f.querySelectorAll('tr[data-code]')].map((tr) => { const g = (n) => tr.querySelector(`[name=${n}]`); return { code: tr.dataset.code, cliente: g('cliente').value, active: g('active').checked, params: g('drMin') ? { drMin: g('drMin').value, trafMin: g('trafMin').value, precioMaxUSD: g('precioMaxUSD').value, repDias: g('repDias').value } : {} }; });
-    try { await api('/api/projects', 'POST', { projects }); hint('Proyectos guardados'); await load(); } catch (e) { hint(e.message); }
+    const projects = [...f.querySelectorAll('tr[data-code]')].map((tr) => { const g = (n) => tr.querySelector(`[name=${n}]`)?.value ?? ''; return { code: tr.dataset.code, cliente: g('cliente'), active: tr.querySelector('[name=active]').checked, params: { drMin: g('drMin'), trafMin: g('trafMin'), precioMaxUSD: g('precioMaxUSD'), repDias: g('repDias'), palabrasMin: g('palabrasMin'), dominio: g('dominio'), paises: g('paises'), servicio: g('servicio') } }; });
+    try { await api('/api/projects', 'POST', { projects }); toast('Proyectos guardados'); await load(); } catch (e) { toast(e.message); }
   }
 });
-document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && $('#modal').innerHTML) closeModal(); });
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && $('#drawer').classList.contains('open')) return closeDrawer();
+  if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter' && $('#drawer').classList.contains('open')) $('#drawer form')?.requestSubmit();
+});
 
 async function loadCal() { try { S.calurl = (await api('/api/calendar')).url; const el = $('#calurl'); if (el) el.textContent = S.calurl; } catch { /* sin conexión */ } }
 
@@ -354,19 +412,26 @@ function b64uToBytes(s) { const p = '='.repeat((4 - s.length % 4) % 4), b = atob
 async function enablePush() {
   const msg = (t) => { const el = $('#pushmsg'); if (el) el.textContent = t; };
   try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return msg('Este navegador no soporta avisos. En iPhone, agregá la app a la pantalla de inicio y abrila desde ahí.');
-    if ((await Notification.requestPermission()) !== 'granted') return msg('Permiso denegado. Activalo en los ajustes del navegador o del teléfono.');
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return msg('Este navegador no permite avisos. Usá Chrome o Edge.');
+    if ((await Notification.requestPermission()) !== 'granted') return msg('Permiso denegado. Habilitalo en la configuración del sitio del navegador.');
     const reg = await navigator.serviceWorker.ready, { publicKey } = await api('/api/vapid');
     const s = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(publicKey) }));
-    await api('/api/push/subscribe', 'POST', s.toJSON()); msg('Avisos activados en este dispositivo ✔');
+    await api('/api/push/subscribe', 'POST', s.toJSON()); msg('Avisos activados en esta computadora.');
   } catch (e) { msg('No se pudo activar: ' + e.message); }
 }
 
 // ---------- arranque ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+const qs = new URLSearchParams(location.search);
 (async () => {
-  if (S.token) { try { S.data = JSON.parse(localStorage.getItem('pe_cache') || 'null'); } catch { /* nada */ } render(); if (S.tab === 'ajustes') loadCal(); return load(); }
+  if (S.token) {
+    try { S.data = JSON.parse(localStorage.getItem('pe_cache') || 'null'); } catch { /* nada */ }
+    if (S.data) render(); if (S.view === 'ajustes') loadCal(); await load();
+    const n = qs.get('nuevo'); if (n === 'lb') openDrawer(lbForm()); else if (n === 'red') openDrawer(redForm()); else if (n === 'horas') openDrawer(hoursForm());
+    if (n) history.replaceState(null, '', '/');
+    return;
+  }
   try { S.setup = (await api('/api/state')).setup; } catch { /* sin conexión */ }
   render();
 })();
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.token) load(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.token && !$('#drawer').classList.contains('open')) load(); });

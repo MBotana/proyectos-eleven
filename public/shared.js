@@ -10,7 +10,7 @@ export const ESTADOS_NEG = ['', 'Solicitado', 'Acuerdo Alcanzado', 'Acuerdo Venc
 export const ESTADOS_RED = ['Pendiente', 'En redacción', 'Entregada'];
 export const PRIORIDADES = ['Baja', 'Normal', 'Alta'];
 export const MONEDAS = ['USD', 'ARS'];
-export const TIPOS_SERVICIO = ['Intervalo métrica 21-40'];
+export const TIPOS_SERVICIO = ['Intervalo métrica 21-40', 'Intervalo métrica 41-60'];
 
 /** Tipos de tarea de la planilla de horas, por tipo de proyecto. */
 export const TAREAS = {
@@ -18,19 +18,25 @@ export const TAREAS = {
   RED: ['A - Redacción manual', 'B - Redacción automatizada', 'C - Carga manual pieza en CMS'],
 };
 
-/** Proyectos habilitados en AppSheet (los de la planilla que no están en AppSheet quedan afuera). */
+/** Proyectos habilitados en AppSheet (verificado el 2026-11-20). Los de la planilla que no están en AppSheet quedan afuera (XUB-RED-1).
+ *  Parámetros tomados de "Parámetros del Proyecto" en Gestión Link Building. */
+export const SEED_VERSION = 2;
 export const PROYECTOS_INICIALES = [
-  { code: 'GAL-LIN-1', cliente: 'Galicia Seguros', tipo: 'LIN', params: { drMin: 20, trafMin: 500, precioMaxUSD: 100, repDias: 90 } },
+  { code: 'GAL-LIN-1', cliente: 'Galicia Seguros', tipo: 'LIN', params: { drMin: 20, trafMin: 500, precioMaxUSD: 100, repDias: 90, palabrasMin: 500, dominio: 'answerseguros.com.ar', paises: 'Argentina', servicio: 'Intervalo métrica 21-40' } },
   { code: 'GAL-RED-1', cliente: 'Galicia Seguros', tipo: 'RED', params: {} },
-  { code: 'LAV-LIN-4', cliente: 'LaVirginia', tipo: 'LIN', params: {} },
+  { code: 'LAV-LIN-4', cliente: 'LaVirginia', tipo: 'LIN', params: { drMin: 21, trafMin: 300, precioMaxUSD: null, repDias: 90, palabrasMin: 500, dominio: 'alicante.com.ar', paises: 'Argentina', servicio: 'Intervalo métrica 21-40' } },
   { code: 'LAV-RED-5', cliente: 'LaVirginia', tipo: 'RED', params: {} },
-  { code: 'NAV-LIN-5', cliente: 'Nave', tipo: 'LIN', params: {} },
+  { code: 'NAV-LIN-5', cliente: 'Nave', tipo: 'LIN', params: { drMin: 1, trafMin: 300, precioMaxUSD: null, repDias: 90, palabrasMin: 500, dominio: 'navenegocios.ar', paises: 'Argentina', servicio: 'Intervalo métrica 21-40' } },
   { code: 'NAV-RED-5', cliente: 'Nave', tipo: 'RED', params: {} },
-  { code: 'TEL-LIN-2', cliente: 'Telecom', tipo: 'LIN', params: {} },
+  { code: 'OMI-LIN-1', cliente: 'Omint', tipo: 'LIN', params: { drMin: 41, trafMin: 300, precioMaxUSD: null, repDias: 90, palabrasMin: 500, dominio: 'omint.com.ar', paises: 'Argentina', servicio: 'Intervalo métrica 41-60' } },
+  { code: 'OMI-RED-2', cliente: 'Omint', tipo: 'RED', params: {} },
+  { code: 'TEL-LIN-2', cliente: 'Telecom', tipo: 'LIN', params: { drMin: 20, trafMin: 1000, precioMaxUSD: 100, repDias: 60, palabrasMin: 800, dominio: 'personal.com.ar', paises: 'Argentina', servicio: 'Intervalo métrica 21-40' } },
   { code: 'TEL-RED-2', cliente: 'Telecom', tipo: 'RED', params: {} },
+  { code: 'XUB-LIN-1', cliente: 'Xubio', tipo: 'LIN', params: { drMin: 21, trafMin: 300, precioMaxUSD: null, repDias: 90, palabrasMin: 500, dominio: 'xubio.com/ar', paises: 'Argentina, Colombia', servicio: 'Intervalo métrica 21-40' } },
+  { code: 'XUB-LIN-2', cliente: 'Xubio', tipo: 'LIN', params: { drMin: 21, trafMin: 300, precioMaxUSD: null, repDias: 90, palabrasMin: 500, dominio: 'xubio.com/co', paises: 'Colombia', servicio: 'Intervalo métrica 21-40' } },
 ];
 
-/** Plan de horas y unidades de la planilla (noviembre 2026). Las filas vacías quedan en 0. */
+/** Plan de horas y unidades de la planilla (noviembre 2026). */
 export const PLAN_INICIAL = {
   month: '2026-11',
   rows: [
@@ -40,8 +46,12 @@ export const PLAN_INICIAL = {
     ['LAV-RED-5', 'A - Redacción manual', 0, 0], ['LAV-RED-5', 'B - Redacción automatizada', 0, 0], ['LAV-RED-5', 'C - Carga manual pieza en CMS', 0, 0],
     ['NAV-LIN-5', 'A - Creación de links', 8.79, 11], ['NAV-LIN-5', 'B - Gestión de proyecto de LB', 0, 0],
     ['NAV-RED-5', 'A - Redacción manual', 1.58, 2],
+    ['OMI-LIN-1', 'A - Creación de links', 4.51, 6],
+    ['OMI-RED-2', 'B - Redacción automatizada', 4.28, 16],
     ['TEL-LIN-2', 'A - Creación de links', 16, 20],
     ['TEL-RED-2', 'B - Redacción automatizada', 4.28, 16],
+    ['XUB-LIN-1', 'A - Creación de links', 4.83, 7],
+    ['XUB-LIN-2', 'A - Creación de links', 1.58, 2],
   ],
 };
 
