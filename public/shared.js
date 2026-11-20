@@ -1,15 +1,22 @@
 // Proyectos Eleven — datos y reglas compartidas entre el servidor y la app.
 
 /** Estados de tarea de Link Building, en el orden en que avanza en AppSheet. */
-export const ESTADOS_LB = ['No Iniciado', 'Gestión de Backlink', 'Para Enviar', 'Revisión y Validación', 'Backlink Publicado', 'Backlink Publicado - MANUAL_INDEX', 'Cerrado'];
-/** Estados que cuentan como link publicado (unidad hecha). */
-export const PUBLICADOS = new Set(['Backlink Publicado', 'Backlink Publicado - MANUAL_INDEX', 'Cerrado']);
+export const ESTADOS_LB = ['No Iniciado', 'Gestión de Backlink', 'Para Enviar', 'Enviado a Medio', 'Revisión y Validación', 'FLAG NO_EDITION_DOC', 'Backlink Publicado', 'Backlink Publicado - MANUAL_INDEX', 'Backlink Publicado - Sin Pago', 'Backlink Publicado - REQUIERE ESQUEMA PRECIOS', 'Cerrado', 'Anulado'];
+/** Link publicado (unidad hecha): cualquier variante de "Backlink Publicado", o Cerrado. */
+export const esPublicado = (e) => /^Backlink Publicado/.test(e || '') || e === 'Cerrado';
+/** Fuera de la lista de activas (como en AppSheet). */
+export const esCerradoLB = (e) => e === 'Cerrado' || e === 'Anulado';
+/** Compatibilidad: objeto con .has() para el resto del código. */
+export const PUBLICADOS = { has: esPublicado };
 /** Estados de la negociación con el medio. */
-export const ESTADOS_NEG = ['', 'Solicitado', 'Acuerdo Alcanzado', 'Acuerdo Vencido', 'Acuerdo Agotado'];
-/** Estados propios de una redacción (en AppSheet solo se carga la tarea). */
-export const ESTADOS_RED = ['Pendiente', 'En redacción', 'Entregada'];
+export const ESTADOS_NEG = ['', 'Solicitado', 'En Negociación', 'Acuerdo Alcanzado', 'Acuerdo Vencido', 'Acuerdo Agotado'];
+/** Estados de redacción vistos en AppSheet (Gestión Content → Tasks). "Pendiente" = creada acá, todavía no cargada en AppSheet. */
+export const ESTADOS_RED = ['Pendiente', 'Revisión General', 'Entrega', 'Entrega - REQUIERE ESQUEMA PRECIOS', 'Para CMS', 'Para CMS - REQUIERE ESQUEMA PRECIOS', 'Cerrado'];
+export const esCerradoRED = (e) => e === 'Cerrado' || e === 'Anulado';
+/** Tu usuario en AppSheet. */
+export const YO = 'Martín Botana';
 export const PRIORIDADES = ['Baja', 'Normal', 'Alta'];
-export const MONEDAS = ['USD', 'ARS'];
+export const MONEDAS = ['USD', 'ARS', 'EUR'];
 export const TIPOS_SERVICIO = ['Intervalo métrica 21-40', 'Intervalo métrica 41-60'];
 
 /** Tipos de tarea de la planilla de horas, por tipo de proyecto. */

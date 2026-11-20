@@ -1,9 +1,9 @@
 // Proyectos Eleven — app de escritorio (PWA instalable desde Chrome o Edge). Un solo usuario; todo se guarda en el servidor.
-import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, avisosLB, hoyEn, addDays, normDomain } from './shared.js';
+import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO, esCerradoLB, esCerradoRED, avisosLB, hoyEn, addDays, normDomain } from './shared.js';
 
 const S = {
   token: localStorage.getItem('pe_token') || '', setup: false, data: null, view: localStorage.getItem('pe_view') || 'inicio', calurl: '',
-  f: { lbProj: '', lbEstado: 'activas', lbQ: '', redProj: '', redEstado: 'activas', redQ: '', medGroup: 'mail_eleven', medQ: '', mes: hoyEn().slice(0, 7) },
+  f: { lbProj: '', lbEstado: 'activas', lbQ: '', lbUser: YO, lbMail: '', lbNeg: '', lbMes: '', lbGroup: '1', redProj: '', redEstado: 'activas', redQ: '', redUser: YO, redGroup: '1', medGroup: 'mail_eleven', medQ: '', mes: hoyEn().slice(0, 7) },
   sort: { lb: ['deadline', 1], red: ['fecha_entrega', 1] },
 };
 const $ = (s) => document.querySelector(s);
@@ -45,17 +45,18 @@ async function load() {
 }
 const proj = (code) => S.data.projects.find((p) => p.code === code);
 const projs = (tipo) => S.data.projects.filter((p) => p.active && (!tipo || p.tipo === tipo));
-const estadoBadge = (e) => `<span class="badge b${ESTADOS_LB.indexOf(e) + 1}">${h(e)}</span>`;
-const redBadge = (e) => `<span class="badge b${e === 'Entregada' ? 5 : e === 'En redacción' ? 2 : 1}">${h(e)}</span>`;
+const estadoOpts = (list, cur) => opts(list.includes(cur) || !cur ? list : [...list, cur], cur);
+const estadoBadge = (e) => { const i = ESTADOS_LB.indexOf(e); const b = /^Backlink Publicado/.test(e) ? 5 : e === 'Cerrado' || e === 'Anulado' ? 7 : i <= 0 ? 1 : i <= 1 ? 2 : i <= 4 ? 3 : 4; return `<span class="badge b${b}">${h(e)}</span>`; };
+const redBadge = (e) => `<span class="badge b${e === 'Cerrado' ? 7 : /^Para CMS/.test(e) ? 5 : /^Entrega/.test(e) ? 3 : e === 'Revisión General' ? 4 : 1}">${h(e)}</span>`;
 function dlTag(d, done) { if (!d) return '<span class="mute">—</span>'; const t = hoy(); if (done) return `<span class="mute">${fmtD(d)}</span>`; return d < t ? `<span class="tag bad">${fmtD(d)}</span>` : d === t ? `<span class="tag warn">Hoy</span>` : d <= addDays(t, 2) ? `<span class="tag warn">${fmtD(d)}</span>` : fmtD(d); }
 
 // ---------- marco ----------
-const VIEWS = [['inicio', 'Inicio'], ['lb', 'Link building'], ['red', 'Redacciones'], ['medios', 'Medios y contactos'], ['horas', 'Horas'], ['proyectos', 'Proyectos'], ['sep'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
+const VIEWS = [['inicio', 'Inicio'], ['lb', 'Contenidos'], ['red', 'Redacciones'], ['medios', 'Medios y contactos'], ['horas', 'Horas'], ['proyectos', 'Proyectos'], ['sep'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
 function render() {
   if (!S.token) return renderLogin();
   if (!S.data) { $('#app').innerHTML = '<div class="login"><div class="mute">Cargando…</div></div>'; return; }
   if (!$('#shell')) $('#app').innerHTML = `<div id="shell"><aside id="side"><div class="brand"><img src="/icon.svg" alt=""><div><b>Proyectos Eleven</b><small>Link building · Contenido</small></div></div><nav id="nav"></nav><div id="sidetimer"></div></aside><section id="main"><header id="head"></header><div id="view"></div></section></div>`;
-  const counts = { lb: S.data.lb.filter((t) => !PUBLICADOS.has(t.estado)).length, red: S.data.red.filter((r) => r.estado !== 'Entregada').length, appsheet: S.data.as_pend.length };
+  const counts = { lb: S.data.lb.filter((t) => t.usuario === YO && !esCerradoLB(t.estado)).length, red: S.data.red.filter((r) => r.usuario === YO && !esCerradoRED(r.estado)).length, appsheet: S.data.as_pend.length };
   $('#nav').innerHTML = VIEWS.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</button>`)).join('');
   const v = VIEWS_FN[S.view] || VIEWS_FN.inicio, out = v();
   $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}</div>`;
@@ -74,8 +75,8 @@ function sortBy(arr, view, getters) { const [k, d] = S.sort[view], g = getters[k
 // ---------- Inicio ----------
 function pendientes() {
   const out = [];
-  for (const t of S.data.lb) if (t.deadline && !PUBLICADOS.has(t.estado)) out.push({ kind: 'lb', id: t.id, d: t.deadline, tipo: 'Link', title: t.anchor || '(sin anchor)', code: t.as_code, project: t.project, estado: estadoBadge(t.estado) });
-  for (const r of S.data.red) if (r.fecha_entrega && r.estado !== 'Entregada') out.push({ kind: 'red', id: r.id, d: r.fecha_entrega, tipo: 'Redacción', title: r.tema, code: '', project: r.project, estado: redBadge(r.estado) });
+  for (const t of S.data.lb) if (t.usuario === YO && t.deadline && !PUBLICADOS.has(t.estado) && !esCerradoLB(t.estado)) out.push({ kind: 'lb', id: t.id, d: t.deadline, tipo: 'Link', title: t.anchor || '(sin anchor)', code: t.as_code, project: t.project, estado: estadoBadge(t.estado) });
+  for (const r of S.data.red) if (r.usuario === YO && r.fecha_entrega && !esCerradoRED(r.estado)) out.push({ kind: 'red', id: r.id, d: r.fecha_entrega, tipo: 'Redacción', title: r.tema, code: '', project: r.project, estado: redBadge(r.estado) });
   return out.sort((a, b) => a.d.localeCompare(b.d));
 }
 function horasMes(mes) { return S.data.hours.filter((x) => x.date.startsWith(mes)).reduce((a, x) => a + x.hours, 0); }
@@ -86,7 +87,7 @@ VIEWS_FN.inicio = () => {
   const totHoy = S.data.hours.filter((x) => x.date === t).reduce((a, x) => a + x.hours, 0);
   const lunes = addDays(t, -((new Date(t + 'T12:00:00Z').getUTCDay() + 6) % 7)), totSem = S.data.hours.filter((x) => x.date >= lunes && x.date <= t).reduce((a, x) => a + x.hours, 0);
   const pm = planMes(mes), rm = horasMes(mes);
-  const rebotes = S.data.lb.filter((x) => !PUBLICADOS.has(x.estado)).map((x) => ({ x, a: avisosLB(x, proj(x.project), S.data.lb) })).filter((o) => o.a.length);
+  const rebotes = S.data.lb.filter((x) => x.usuario === YO && !PUBLICADOS.has(x.estado) && !esCerradoLB(x.estado)).map((x) => ({ x, a: avisosLB(x, proj(x.project), S.data.lb) })).filter((o) => o.a.length);
   const fecha = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
   return {
     title: 'Inicio', sub: fecha.charAt(0).toUpperCase() + fecha.slice(1),
@@ -115,24 +116,51 @@ function proyectosResumen(mes) {
   return tbl('LIN', 'Link building por proyecto') + tbl('RED', 'Redacción por proyecto');
 }
 const bar = (r, p) => `<span class="bar"><i class="${p > 0 && r > p ? 'over' : ''}" style="width:${p > 0 ? Math.min(100, (r / p) * 100) : r > 0 ? 100 : 0}%"></i></span>`;
-const hechas = (p, mes) => (p.tipo === 'LIN' ? S.data.lb.filter((t) => t.project === p.code && t.publicado && t.publicado.startsWith(mes)).length : S.data.red.filter((r) => r.project === p.code && r.entregada && r.entregada.startsWith(mes)).length);
+const hechas = (p, mes) => (p.tipo === 'LIN' ? S.data.lb.filter((t) => t.usuario === YO && t.project === p.code && t.publicado && t.publicado.startsWith(mes)).length : S.data.red.filter((r) => r.usuario === YO && r.project === p.code && r.entregada && r.entregada.startsWith(mes)).length);
 
 // ---------- Link building ----------
+const usuarios = (arr) => [...new Set(arr.map((x) => x.usuario).filter(Boolean))].sort((a, b) => (a === YO ? -1 : b === YO ? 1 : a.localeCompare(b)));
+const fmtMes = (d) => (d ? `${MESES[Number(d.slice(5, 7)) - 1].slice(0, 3)} ${d.slice(2, 4)}` : '');
+/** Filas agrupadas por proyecto (encabezado con cliente y cantidad), como en AppSheet. */
+function agrupar(arr, cols, rowFn, group) {
+  if (group !== '1') return arr.map(rowFn).join('');
+  let out = '', cur = null;
+  const byP = arr.reduce((m, x) => ((m[x.project] = (m[x.project] || 0) + 1), m), {});
+  for (const x of [...arr].sort((a, b) => S.data.projects.findIndex((p) => p.code === a.project) - S.data.projects.findIndex((p) => p.code === b.project))) {
+    if (x.project !== cur) { cur = x.project; out += `<tr class="grp"><td colspan="${cols}"><span class="mono">${h(cur)}</span> <span class="mute" style="font-weight:400">· ${h(proj(cur)?.cliente || '')} · ${byP[cur]} tarea${byP[cur] > 1 ? 's' : ''}</span></td></tr>`; }
+    out += rowFn(x);
+  }
+  return out;
+}
 VIEWS_FN.lb = () => {
   const f = S.f, q = f.lbQ.trim().toLowerCase();
-  let arr = S.data.lb.filter((t) => (!f.lbProj || t.project === f.lbProj) && (f.lbEstado === 'todas' || (f.lbEstado === 'activas' ? !PUBLICADOS.has(t.estado) : t.estado === f.lbEstado)));
+  let arr = S.data.lb.filter((t) => (!f.lbProj || t.project === f.lbProj) && (!f.lbUser || t.usuario === f.lbUser) && (!f.lbMail || t.mail_eleven === f.lbMail) && (!f.lbNeg || t.estado_neg === f.lbNeg) && (!f.lbMes || (t.deadline || '').startsWith(f.lbMes))
+    && (f.lbEstado === 'todas' || (f.lbEstado === 'activas' ? !esCerradoLB(t.estado) : f.lbEstado === 'pendientes' ? !esCerradoLB(t.estado) && !PUBLICADOS.has(t.estado) : t.estado === f.lbEstado)));
   if (q) arr = arr.filter((t) => [t.as_code, t.anchor, t.medio, t.mail_eleven, t.contacto_medio, t.url_cliente, t.notas].join(' ').toLowerCase().includes(q));
-  sortBy(arr, 'lb', { deadline: (t) => t.deadline || '9999', estado: (t) => ESTADOS_LB.indexOf(t.estado), dr: (t) => Number(t.dr ?? -1), precio: (t) => Number(t.precio ?? -1), medio: (t) => normDomain(t.medio) });
+  sortBy(arr, 'lb', { deadline: (t) => t.deadline || '9999', estado: (t) => ESTADOS_LB.indexOf(t.estado), precio: (t) => Number(t.precio ?? -1), medio: (t) => normDomain(t.medio), as_code: (t) => t.as_code.replace(/\d+$/, (n) => n.padStart(4, '0')) });
+  const base = S.data.lb.filter((t) => !f.lbUser || t.usuario === f.lbUser);
+  const mails = [...new Set(base.map((t) => t.mail_eleven).filter(Boolean))].sort(), meses = [...new Set(base.map((t) => (t.deadline || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+  const estados = [...new Set([...ESTADOS_LB, ...base.map((t) => t.estado)])];
+  const sync = S.data.settings.as_sync_at ? `Copiado de AppSheet el ${new Date(Number(S.data.settings.as_sync_at)).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}` : '';
   return {
-    title: 'Link building', sub: `${arr.length} tarea${arr.length === 1 ? '' : 's'}${f.lbEstado === 'activas' ? ' activas' : ''}`,
+    title: 'Contenidos', sub: `Tareas de link building · ${arr.length} resultado${arr.length === 1 ? '' : 's'}${sync ? ' · ' + sync : ''}`,
     actions: `<button class="btn" data-act="newlb">${ic('plus')}Nueva tarea</button>`,
-    body: `<div class="toolbar"><select data-f="lbProj"><option value="">Todos los proyectos</option>${opts(projs('LIN').map((p) => p.code), f.lbProj, projs('LIN').map((p) => `${p.code} · ${p.cliente}`))}</select>
-      <select data-f="lbEstado">${opts(['activas', 'todas', ...ESTADOS_LB], f.lbEstado, ['Activas', 'Todas', ...ESTADOS_LB])}</select>${searchBox('lbQ', 'Buscar anchor, medio, mail, código…')}</div>
-    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('lb', 'as_code', 'Código / proyecto')}${th('lb', 'anchor', 'Anchor')}${th('lb', 'medio', 'Medio')}${th('lb', 'dr', 'DR', 'num')}${th('lb', 'mail_eleven', 'Contacté desde')}${th('lb', 'precio', 'Precio', 'num')}${th('lb', 'deadline', 'Deadline')}${th('lb', 'estado', 'Estado')}</tr></thead><tbody>
-      ${arr.map((x) => { const av = PUBLICADOS.has(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb);
-        return `<tr data-open="lb" data-id="${x.id}"><td class="mono">${x.as_code ? h(x.as_code) : `<span class="mute">${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
-          <td>${h(normDomain(x.medio))}</td><td class="num">${fmtN(x.dr)}</td><td title="${h(x.estado_neg)}">${h(x.mail_eleven)}</td><td class="num nowrap">${x.precio !== null && x.precio !== undefined ? `${h(x.moneda)} ${fmtN(x.precio)}` : ''}</td><td>${dlTag(x.deadline, PUBLICADOS.has(x.estado))}</td>
-          <td><select data-act="lbestado" data-id="${x.id}">${opts(ESTADOS_LB, x.estado)}</select></td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">No hay tareas con estos filtros.</td></tr>'}</tbody></table></div>`,
+    body: `<div class="toolbar wrap">
+      <select data-f="lbProj"><option value="">Todos los proyectos</option>${opts(projs('LIN').map((p) => p.code), f.lbProj, projs('LIN').map((p) => `${p.code} · ${p.cliente}`))}</select>
+      <select data-f="lbEstado">${opts(['activas', 'pendientes', 'todas', ...estados], f.lbEstado, ['Activas (sin cerradas ni anuladas)', 'Sin publicar', 'Todas', ...estados])}</select>
+      <select data-f="lbUser"><option value="">Todos los asignados</option>${opts(usuarios(S.data.lb), f.lbUser, usuarios(S.data.lb).map((u) => (u === YO ? `${u} (yo)` : u)))}</select>
+      <select data-f="lbMail"><option value="">Todos los mails de contacto</option>${opts(mails, f.lbMail)}</select>
+      <select data-f="lbNeg"><option value="">Toda negociación</option>${opts(ESTADOS_NEG.filter(Boolean), f.lbNeg)}</select>
+      <select data-f="lbMes"><option value="">Todos los meses</option>${opts(meses, f.lbMes, meses.map((m) => mesLargo(m)))}</select>
+      ${searchBox('lbQ', 'Buscar anchor, medio, mail, código…')}
+      <label class="check" style="margin-left:auto"><input type="checkbox" data-f="lbGroup" ${f.lbGroup === '1' ? 'checked' : ''}> Agrupar por proyecto</label></div>
+    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('lb', 'as_code', 'Código')}${th('lb', 'anchor', 'Anchor')}${th('lb', 'medio', 'Medio')}${th('lb', 'mail_eleven', 'Mail de contacto')}${th('lb', 'estado_neg', 'Negociación')}${th('lb', 'precio', 'Precio', 'num')}${th('lb', 'deadline', 'Mes plan.')}${f.lbUser ? '' : th('lb', 'usuario', 'Asignado')}${th('lb', 'estado', 'Estado')}</tr></thead><tbody>
+      ${agrupar(arr, f.lbUser ? 8 : 9, (x) => { const av = PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb);
+        return `<tr data-open="lb" data-id="${x.id}"><td class="mono">${x.as_code ? h(x.as_code) : `<span class="tag acc">Nueva · ${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
+          <td title="${h(x.medio)}">${h(normDomain(x.medio))}</td><td title="${h(x.mail_eleven)}">${h(x.mail_eleven)}</td><td>${h(x.estado_neg)}</td><td class="num nowrap">${x.precio !== null && x.precio !== undefined ? `${h(x.moneda)} ${fmtN(x.precio)}` : ''}</td>
+          <td class="nowrap">${PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? `<span class="mute">${fmtMes(x.deadline)}</span>` : x.deadline && x.deadline < hoy() ? `<span class="tag bad">${fmtMes(x.deadline)}</span>` : fmtMes(x.deadline)}</td>
+          ${f.lbUser ? '' : `<td class="nowrap ${x.usuario === YO ? '' : 'mute'}">${h(x.usuario)}</td>`}
+          <td><select data-act="lbestado" data-id="${x.id}">${estadoOpts(ESTADOS_LB, x.estado)}</select></td></tr>`; }, f.lbGroup) || '<tr><td colspan="9" class="empty">No hay tareas con estos filtros.</td></tr>'}</tbody></table></div>`,
   };
 };
 function lbForm(x = {}) {
@@ -143,10 +171,12 @@ function lbForm(x = {}) {
       <div class="section">Tarea</div>
       <label>Proyecto<select name="project" data-act="lbproj">${opts(ps.map((q) => q.code), p, ps.map((q) => `${q.code} · ${q.cliente}`))}</select></label>
       <label>Código en AppSheet<input name="as_code" class="mono" placeholder="${h(p)}-00" value="${h(x.as_code)}"></label>
-      <label>Estado<select name="estado">${opts(ESTADOS_LB, x.estado || 'No Iniciado')}</select></label>
-      <label>Deadline<input type="date" name="deadline" value="${h(x.deadline)}"></label>
+      <label>Estado<select name="estado">${estadoOpts(ESTADOS_LB, x.estado || 'No Iniciado')}</select></label>
+      <label>Mes planificado (deadline)<input type="date" name="deadline" value="${h(x.deadline)}"></label>
+      <label>Asignado a<input name="usuario" list="users" value="${h(x.usuario || YO)}"></label>
+      <label>Fecha de publicación<input type="date" value="${h(x.publicado)}" disabled></label>
       <label>Tipo de servicio<select name="tipo_servicio">${opts(TIPOS_SERVICIO, x.tipo_servicio || pp.servicio)}</select></label>
-      <label>Negociación<select name="estado_neg">${opts(ESTADOS_NEG, x.estado_neg)}</select></label>
+      <label>Negociación<select name="estado_neg">${estadoOpts(ESTADOS_NEG, x.estado_neg)}</select></label>
       <label class="full">Anchor text<input name="anchor" value="${h(x.anchor)}"></label>
       <label class="full">URL del cliente<input name="url_cliente" type="url" placeholder="https://${h(pp.dominio || '')}" value="${h(x.url_cliente)}"></label>
       <div class="section">Medio</div>
@@ -155,17 +185,17 @@ function lbForm(x = {}) {
       <label>Precio<input name="precio" type="number" step="any" value="${h(x.precio)}"></label>
       <label>Moneda<select name="moneda">${opts(MONEDAS, x.moneda || 'USD')}</select></label>
       <div class="section">Contacto</div>
-      <label>Mail desde el que contacté<input name="mail_eleven" type="email" list="mails" placeholder="nombre@eleven-agencia.net" value="${h(x.mail_eleven)}"></label>
+      <label>Mail de contacto (Mail Eleven)<input name="mail_eleven" list="mails" placeholder="nombre@eleven-agencia.net" value="${h(x.mail_eleven)}"></label>
       <label>Contacto del medio<input name="contacto_medio" placeholder="Mail, nombre o proveedor" value="${h(x.contacto_medio)}"></label>
       <label class="full">Notas<textarea name="notas">${h(x.notas)}</textarea></label>
-    </div><datalist id="mails">${mails.map((m) => `<option value="${h(m)}">`).join('')}</datalist>
+    </div><datalist id="mails">${mails.map((m) => `<option value="${h(m)}">`).join('')}</datalist><datalist id="users">${usuarios([...S.data.lb, ...S.data.red]).map((u) => `<option value="${h(u)}">`).join('')}</datalist>
     <div id="lbav"></div><div class="err" id="ferr"></div></div>
     <div class="df">${x.id ? `<button type="button" class="btn danger left" data-act="del" data-kind="lb">Borrar</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
 }
 function lbAvisosVivos() {
   const f = $('#lbf'); if (!f) return;
   const x = Object.fromEntries(new FormData(f)); x.id = f.dataset.id;
-  const a = PUBLICADOS.has(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb), pp = proj(x.project)?.params || {};
+  const a = PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb), pp = proj(x.project)?.params || {};
   const lim = [pp.drMin != null && `DR ≥ ${pp.drMin}`, pp.trafMin != null && `tráfico ≥ ${fmtN(pp.trafMin)}`, pp.precioMaxUSD != null && `USD ≤ ${pp.precioMaxUSD}`, pp.repDias && `repetir medio cada ${pp.repDias} días`, pp.palabrasMin && `${pp.palabrasMin} palabras mín.`].filter(Boolean).join(' · ');
   $('#lbav').innerHTML = (lim ? `<p class="small mute" style="margin:14px 0 0">Parámetros de ${h(x.project)}: ${lim}</p>` : '') + (a.length ? `<div class="alert"><b style="color:var(--warn);font-size:12.5px">AppSheet va a rechazar o frenar esta tarea</b><ul class="warnlist">${a.map((s) => `<li>${h(s)}</li>`).join('')}</ul></div>` : '');
 }
@@ -173,17 +203,22 @@ function lbAvisosVivos() {
 // ---------- Redacciones ----------
 VIEWS_FN.red = () => {
   const f = S.f, q = f.redQ.trim().toLowerCase();
-  let arr = S.data.red.filter((r) => (!f.redProj || r.project === f.redProj) && (f.redEstado === 'todas' || (f.redEstado === 'activas' ? r.estado !== 'Entregada' : r.estado === f.redEstado)));
-  if (q) arr = arr.filter((r) => [r.tema, r.subproyecto, r.notas].join(' ').toLowerCase().includes(q));
-  sortBy(arr, 'red', { fecha_entrega: (r) => r.fecha_entrega || '9999', prioridad: (r) => -PRIORIDADES.indexOf(r.prioridad), estado: (r) => ESTADOS_RED.indexOf(r.estado) });
+  let arr = S.data.red.filter((r) => (!f.redProj || r.project === f.redProj) && (!f.redUser || r.usuario === f.redUser) && (f.redEstado === 'todas' || (f.redEstado === 'activas' ? !esCerradoRED(r.estado) : r.estado === f.redEstado)));
+  if (q) arr = arr.filter((r) => [r.as_code, r.tema, r.subproyecto, r.variante, r.notas].join(' ').toLowerCase().includes(q));
+  sortBy(arr, 'red', { fecha_entrega: (r) => r.fecha_entrega || '9999', prioridad: (r) => -PRIORIDADES.indexOf(r.prioridad), estado: (r) => ESTADOS_RED.indexOf(r.estado), as_code: (r) => (r.as_code || '~').replace(/\d+$/, (n) => n.padStart(4, '0')) });
   const pendAS = new Set(S.data.as_pend.filter((a) => a.entity === 'red').map((a) => a.ref));
+  const base = S.data.red.filter((r) => !f.redUser || r.usuario === f.redUser), estados = [...new Set([...ESTADOS_RED, ...base.map((r) => r.estado)])];
   return {
     title: 'Redacciones', sub: `${arr.length} redacci${arr.length === 1 ? 'ón' : 'ones'}`, actions: `<button class="btn" data-act="newred">${ic('plus')}Nueva redacción</button>`,
     body: `<div class="toolbar"><select data-f="redProj"><option value="">Todos los proyectos</option>${opts(projs('RED').map((p) => p.code), f.redProj, projs('RED').map((p) => `${p.code} · ${p.cliente}`))}</select>
-      <select data-f="redEstado">${opts(['activas', 'todas', ...ESTADOS_RED], f.redEstado, ['Activas', 'Todas', ...ESTADOS_RED])}</select>${searchBox('redQ', 'Buscar tema…')}</div>
-    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('red', 'tema', 'Tema')}${th('red', 'project', 'Proyecto')}${th('red', 'subproyecto', 'Subproyecto')}${th('red', 'ia', 'Tipo')}${th('red', 'prioridad', 'Prioridad')}${th('red', 'fecha_entrega', 'Entrega')}<th>AppSheet</th>${th('red', 'estado', 'Estado')}</tr></thead><tbody>
-      ${arr.map((r) => `<tr data-open="red" data-id="${r.id}"><td title="${h(r.tema)}">${h(r.tema)}</td><td class="mono">${h(r.project)}</td><td>${h(r.subproyecto)}</td><td>${r.ia ? 'IA' : 'Manual'}</td><td>${r.prioridad === 'Alta' ? '<span class="tag bad">Alta</span>' : r.prioridad === 'Baja' ? '<span class="tag">Baja</span>' : 'Normal'}</td>
-        <td>${dlTag(r.fecha_entrega, r.estado === 'Entregada')}</td><td>${pendAS.has(r.id) ? '<span class="tag acc">Por cargar</span>' : '<span class="mute">Al día</span>'}</td><td><select data-act="redestado" data-id="${r.id}">${opts(ESTADOS_RED, r.estado)}</select></td></tr>`).join('') || '<tr><td colspan="8" class="empty">No hay redacciones con estos filtros.</td></tr>'}</tbody></table></div>`,
+      <select data-f="redEstado">${opts(['activas', 'todas', ...estados], f.redEstado, ['Activas (sin cerradas)', 'Todas', ...estados])}</select>
+      <select data-f="redUser"><option value="">Todos los asignados</option>${opts(usuarios(S.data.red), f.redUser, usuarios(S.data.red).map((u) => (u === YO ? `${u} (yo)` : u)))}</select>
+      ${searchBox('redQ', 'Buscar tema o código…')}<label class="check" style="margin-left:auto"><input type="checkbox" data-f="redGroup" ${f.redGroup === '1' ? 'checked' : ''}> Agrupar por proyecto</label></div>
+    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('red', 'as_code', 'Código')}${th('red', 'tema', 'Tema')}${th('red', 'subproyecto', 'Subproyecto')}${th('red', 'prioridad', 'Prioridad')}${th('red', 'fecha_entrega', 'Deadline')}${th('red', 'entregada', 'Entregada')}${f.redUser ? '' : th('red', 'usuario', 'Asignado')}${th('red', 'estado', 'Estado')}</tr></thead><tbody>
+      ${agrupar(arr, f.redUser ? 7 : 8, (r) => `<tr data-open="red" data-id="${r.id}"><td class="mono">${r.as_code ? h(r.as_code) : `<span class="tag acc">${pendAS.has(r.id) ? 'Por cargar' : 'Nueva'}</span>`}</td><td title="${h(r.tema)}" style="max-width:340px">${h(r.tema)}</td><td>${h([r.subproyecto, r.variante].filter(Boolean).join(' · '))}</td>
+        <td>${r.prioridad === 'Alta' || r.prioridad === 'Urgente' ? `<span class="tag bad">${h(r.prioridad)}</span>` : r.prioridad === 'Baja' ? '<span class="tag">Baja</span>' : h(r.prioridad)}</td>
+        <td>${dlTag(r.fecha_entrega, esCerradoRED(r.estado) || !!r.entregada)}</td><td class="mute">${fmtD(r.entregada)}</td>${f.redUser ? '' : `<td class="nowrap ${r.usuario === YO ? '' : 'mute'}">${h(r.usuario)}</td>`}
+        <td><select data-act="redestado" data-id="${r.id}">${estadoOpts(ESTADOS_RED, r.estado)}</select></td></tr>`, f.redGroup) || '<tr><td colspan="8" class="empty">No hay redacciones con estos filtros.</td></tr>'}</tbody></table></div>`,
   };
 };
 function redForm(r = {}) {
@@ -191,14 +226,18 @@ function redForm(r = {}) {
   return `<form id="redf" data-id="${h(r.id || '')}"><div class="dh"><h2>${r.id ? 'Redacción' : 'Nueva redacción'}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
     <div class="db"><p class="small mute" style="margin:0 0 14px">Mismos campos que pide AppSheet en Carga de Redacciones.</p><div class="fields">
       <label class="full">Tema *<input name="tema" required value="${h(r.tema)}"></label>
+      <label>Código en AppSheet<input name="as_code" class="mono" placeholder="Se completa al cargarla" value="${h(r.as_code)}"></label>
+      <label>Asignado a<input name="usuario" value="${h(r.usuario || YO)}"></label>
       <label>Proyecto<select name="project">${opts(ps.map((q) => q.code), r.project || S.f.redProj || ps[0]?.code, ps.map((q) => `${q.code} · ${q.cliente}`))}</select></label>
       <label>Subproyecto (opcional)<input name="subproyecto" value="${h(r.subproyecto)}"></label>
+      <label>Variante de subproyecto (opcional)<input name="variante" value="${h(r.variante)}"></label>
+      <label>Deadline estado<input type="date" name="deadline_estado" value="${h(r.deadline_estado)}"></label>
       <label>Idioma<input name="idioma" value="${h(r.idioma || 'Español')}"></label>
       <label>País<input name="pais" value="${h(r.pais || 'Argentina')}"></label>
-      <label>Fecha de entrega<input type="date" name="fecha_entrega" value="${h(r.fecha_entrega || hoy())}"></label>
-      <label>Prioridad<select name="prioridad">${opts(PRIORIDADES, r.prioridad || 'Normal')}</select></label>
-      <label>Redacción IA<select name="ia">${opts(['1', '0'], r.ia === 0 ? '0' : '1', ['Sí', 'No'])}</select></label>
-      <label>Estado<select name="estado">${opts(ESTADOS_RED, r.estado || 'Pendiente')}</select></label>
+      <label>Deadline tarea<input type="date" name="fecha_entrega" value="${h(r.fecha_entrega || hoy())}"></label>
+      <label>Prioridad<select name="prioridad">${estadoOpts(PRIORIDADES, r.prioridad || 'Normal')}</select></label>
+      <label>Redacción IA<select name="ia">${opts(['1', '0'], r.ia === 0 && r.id ? '0' : '1', ['Sí', 'No'])}</select></label>
+      <label>Estado<select name="estado">${estadoOpts(ESTADOS_RED, r.estado || 'Pendiente')}</select></label>
       <label class="full">Notas<textarea name="notas">${h(r.notas)}</textarea></label>
     </div><div class="err" id="ferr"></div></div>
     <div class="df">${r.id ? `<button type="button" class="btn danger left" data-act="del" data-kind="red">Borrar</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
@@ -365,7 +404,7 @@ document.addEventListener('click', async (ev) => {
 });
 document.addEventListener('change', async (ev) => {
   const el = ev.target;
-  if (el.dataset.f && el.type !== 'search') { S.f[el.dataset.f] = el.value; render(); return; }
+  if (el.dataset.f && el.type !== 'search') { S.f[el.dataset.f] = el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value; render(); return; }
   if (el.dataset.act === 'lbestado' || el.dataset.act === 'redestado') {
     const kind = el.dataset.act === 'lbestado' ? 'lb' : 'red', x = S.data[kind].find((o) => o.id === el.dataset.id);
     try { await api('/api/' + kind, 'POST', { ...x, estado: el.value }); toast('Estado actualizado · anotado en Pendientes AppSheet'); await load(); } catch (e) { toast(e.message); el.value = x.estado; }

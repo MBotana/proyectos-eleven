@@ -2,8 +2,8 @@
  * Todo /api/* (salvo estado, alta inicial e ingreso) exige Authorization: Bearer <token de sesión>.
  * El calendario se publica en /cal/<token>.ics para suscribirse desde Google Calendar. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { SCHEMA } from './schema.ts';
-import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, hoyEn, addDays } from '../public/shared.js';
+import { SCHEMA, MIGRATIONS } from './schema.ts';
+import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays } from '../public/shared.js';
 
 export interface Env { DB: any; ASSETS?: any }
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -33,6 +33,7 @@ const ready = new WeakSet<object>();
 export async function ensureSchema(env: Env) {
   if (ready.has(env.DB)) return;
   for (const s of SCHEMA) await env.DB.prepare(s).run();
+  for (const s of MIGRATIONS) await env.DB.prepare(s).run().catch(() => undefined);
   // Datos iniciales y actualizaciones: suma proyectos y filas de plan nuevas sin pisar lo que ya editaste.
   const v = Number((await env.DB.prepare("SELECT value FROM settings WHERE key = 'seed_v'").first())?.value ?? 0);
   if (v < SEED_VERSION) {
@@ -61,7 +62,7 @@ async function getS(env: Env, key: string): Promise<string | null> {
 async function putS(env: Env, key: string, value: string) {
   await env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(key, value).run();
 }
-const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '' };
+const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '' };
 
 // ---------- acceso (una sola cuenta: contraseña) ----------
 const PBKDF2_IT = 100000;
@@ -101,13 +102,13 @@ async function logAS(env: Env, entity: 'lb' | 'red', ref: string, label: string,
 }
 
 // ---------- tareas de link building ----------
-const LB_FIELDS = ['project', 'as_code', 'estado', 'tipo_servicio', 'anchor', 'url_cliente', 'medio', 'dr', 'trafico', 'precio', 'moneda', 'estado_neg', 'mail_eleven', 'contacto_medio', 'deadline', 'notas'] as const;
+const LB_FIELDS = ['project', 'as_code', 'estado', 'usuario', 'tipo_servicio', 'anchor', 'url_cliente', 'medio', 'dr', 'trafico', 'precio', 'moneda', 'estado_neg', 'mail_eleven', 'contacto_medio', 'deadline', 'notas'] as const;
 function cleanLB(b: any) {
   return {
-    project: str(b.project, 40), as_code: str(b.as_code, 40).toUpperCase(), estado: oneOf(b.estado, ESTADOS_LB, 'No Iniciado'),
+    project: str(b.project, 40), as_code: str(b.as_code, 40).toUpperCase(), estado: str(b.estado, 80) || 'No Iniciado', usuario: str(b.usuario, 80) || YO,
     tipo_servicio: oneOf(b.tipo_servicio, TIPOS_SERVICIO, 'Intervalo métrica 21-40'), anchor: str(b.anchor, 300), url_cliente: str(b.url_cliente, 500),
-    medio: str(b.medio, 200), dr: numOrNull(b.dr), trafico: numOrNull(b.trafico), precio: numOrNull(b.precio), moneda: oneOf(b.moneda, MONEDAS, 'USD'),
-    estado_neg: oneOf(b.estado_neg, ESTADOS_NEG, ''), mail_eleven: str(b.mail_eleven, 120).toLowerCase(), contacto_medio: str(b.contacto_medio, 200),
+    medio: str(b.medio, 200), dr: numOrNull(b.dr), trafico: numOrNull(b.trafico), precio: numOrNull(b.precio), moneda: oneOf(b.moneda, [...MONEDAS, ''], 'USD'),
+    estado_neg: str(b.estado_neg, 60), mail_eleven: str(b.mail_eleven, 120).toLowerCase(), contacto_medio: str(b.contacto_medio, 200),
     deadline: isDate(b.deadline) ? b.deadline : '', notas: str(b.notas, 2000),
   };
 }
@@ -134,12 +135,13 @@ async function saveLB(env: Env, b: any) {
 }
 
 // ---------- redacciones ----------
-const RED_FIELDS = ['project', 'tema', 'subproyecto', 'idioma', 'pais', 'fecha_entrega', 'prioridad', 'ia', 'estado', 'notas'] as const;
+const RED_FIELDS = ['project', 'as_code', 'tema', 'subproyecto', 'variante', 'idioma', 'pais', 'fecha_entrega', 'deadline_estado', 'prioridad', 'ia', 'estado', 'usuario', 'notas'] as const;
 function cleanRED(b: any) {
   return {
-    project: str(b.project, 40), tema: str(b.tema, 300), subproyecto: str(b.subproyecto, 120), idioma: str(b.idioma, 40) || 'Español', pais: str(b.pais, 60) || 'Argentina',
-    fecha_entrega: isDate(b.fecha_entrega) ? b.fecha_entrega : '', prioridad: oneOf(b.prioridad, PRIORIDADES, 'Normal'), ia: b.ia ? 1 : 0,
-    estado: oneOf(b.estado, ESTADOS_RED, 'Pendiente'), notas: str(b.notas, 2000),
+    project: str(b.project, 40), as_code: str(b.as_code, 40).toUpperCase(), tema: str(b.tema, 300), subproyecto: str(b.subproyecto, 120), variante: str(b.variante, 120),
+    deadline_estado: isDate(b.deadline_estado) ? b.deadline_estado : '', usuario: str(b.usuario, 80) || YO, idioma: str(b.idioma, 40) || 'Español', pais: str(b.pais, 60) || 'Argentina',
+    fecha_entrega: isDate(b.fecha_entrega) ? b.fecha_entrega : '', prioridad: str(b.prioridad, 30) || 'Normal', ia: b.ia ? 1 : 0,
+    estado: str(b.estado, 80) || 'Pendiente', notas: str(b.notas, 2000),
   };
 }
 async function saveRED(env: Env, b: any) {
@@ -151,7 +153,7 @@ async function saveRED(env: Env, b: any) {
     if (!old) throw Object.assign(new Error('La redacción no existe'), { status: 404 });
     const changes: string[] = [];
     for (const k of RED_FIELDS) if (k !== 'notas' && String(old[k] ?? '') !== String((v as any)[k] ?? '')) changes.push(`${k}: ${old[k] ?? '—'} → ${(v as any)[k] ?? '—'}`);
-    const entregada = v.estado === 'Entregada' ? (old.entregada || hoy) : '';
+    const entregada = old.entregada || '';
     await env.DB.prepare(`UPDATE redacciones SET ${RED_FIELDS.map(k => `${k} = ?`).join(', ')}, entregada = ?, updated_at = ? WHERE id = ?`)
       .bind(...RED_FIELDS.map(k => (v as any)[k]), entregada, now, b.id).run();
     if (changes.length) await logAS(env, 'red', b.id, `${v.project} · ${v.tema}`, changes.join(' · '));
@@ -159,7 +161,7 @@ async function saveRED(env: Env, b: any) {
   }
   const id = newId();
   await env.DB.prepare(`INSERT INTO redacciones (id, ${RED_FIELDS.join(', ')}, entregada, created_at, updated_at) VALUES (?, ${RED_FIELDS.map(() => '?').join(', ')}, ?, ?, ?)`)
-    .bind(id, ...RED_FIELDS.map(k => (v as any)[k]), v.estado === 'Entregada' ? hoy : '', now, now).run();
+    .bind(id, ...RED_FIELDS.map(k => (v as any)[k]), '', now, now).run();
   await logAS(env, 'red', id, `${v.project} · ${v.tema}`, 'Redacción nueva: cargar en AppSheet (Carga de Redacciones)');
   return id;
 }
@@ -177,12 +179,52 @@ async function saveHours(env: Env, b: any) {
   return id;
 }
 
+
+// ---------- importación desde AppSheet ----------
+/** "30/11/2026" → "2026-11-30". */
+export const asDate = (s: unknown) => { const m = String(s ?? '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : ''; };
+/** "$143,537.56" → 143537.56 */
+export const asMoney = (s: unknown) => { const t = String(s ?? '').replace(/[^\d.\-]/g, ''); return t ? Number(t) : null; };
+/**
+ * Carga o actualiza tareas copiadas de AppSheet (id = código de AppSheet). Pisa solo lo que trae AppSheet;
+ * los datos que existen solo acá (DR, tráfico, URL, contacto del medio, notas) se conservan. No genera pendientes para AppSheet.
+ * lb:  [código, mes planificado, tipo, estado, anchor, medio, negociación, moneda, precio, fecha entrega, usuario, mail]
+ * red: [código, tema, país, idioma, subproyecto, variante, deadline, prioridad, estado, deadline estado, usuario, fecha entrega]
+ */
+export async function importAS(env: Env, b: any) {
+  const now = Date.now(), codes = new Set(((await env.DB.prepare('SELECT code FROM projects').all()).results as any[]).map(r => r.code));
+  const out = { lb: 0, red: 0, saltadas: 0 };
+  for (const r of Array.isArray(b.lb) ? b.lb : []) {
+    const code = str(r[0], 40).toUpperCase(), project = code.replace(/-\d+$/, '');
+    if (!codes.has(project)) { out.saltadas++; continue; }
+    const pub = asDate(r[9]);
+    await env.DB.prepare(`INSERT INTO lb_tasks (id, project, as_code, estado, usuario, tipo_servicio, anchor, medio, estado_neg, moneda, precio, mail_eleven, deadline, publicado, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET estado = excluded.estado, usuario = excluded.usuario, tipo_servicio = excluded.tipo_servicio, anchor = excluded.anchor, medio = excluded.medio,
+        estado_neg = excluded.estado_neg, moneda = excluded.moneda, precio = excluded.precio, mail_eleven = excluded.mail_eleven, deadline = excluded.deadline, publicado = excluded.publicado, updated_at = excluded.updated_at`)
+      .bind(code, project, code, str(r[3], 80) || 'No Iniciado', str(r[10], 80), str(r[2], 60), str(r[4], 300), str(r[5], 200), str(r[6], 60), str(r[7], 8), asMoney(r[8]), str(r[11], 120).toLowerCase(), asDate(r[1]), pub, now, now).run();
+    out.lb++;
+  }
+  for (const r of Array.isArray(b.red) ? b.red : []) {
+    const code = str(r[0], 40).toUpperCase(), project = code.replace(/-\d+$/, '');
+    if (!codes.has(project)) { out.saltadas++; continue; }
+    await env.DB.prepare(`INSERT INTO redacciones (id, project, as_code, tema, pais, idioma, subproyecto, variante, fecha_entrega, prioridad, estado, deadline_estado, usuario, entregada, ia, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET tema = excluded.tema, pais = excluded.pais, idioma = excluded.idioma, subproyecto = excluded.subproyecto, variante = excluded.variante, fecha_entrega = excluded.fecha_entrega,
+        prioridad = excluded.prioridad, estado = excluded.estado, deadline_estado = excluded.deadline_estado, usuario = excluded.usuario, entregada = excluded.entregada, updated_at = excluded.updated_at`)
+      .bind(code, project, code, str(r[1], 300), str(r[2], 60), str(r[3], 40), str(r[4], 120), str(r[5], 120), asDate(r[6]), str(r[7], 30) || 'Normal', str(r[8], 80), asDate(r[9]), str(r[10], 80), asDate(r[11]), now, now).run();
+    out.red++;
+  }
+  await putS(env, 'as_sync_at', String(now));
+  return out;
+}
+
 // ---------- calendario (.ics) ----------
 const icsEsc = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 const fold = (line: string) => { const out: string[] = []; let s = line; while (enc(s).length > 74) { let n = 74; while (enc(s.slice(0, n)).length > 74) n--; out.push(s.slice(0, n)); s = ' ' + s.slice(n); } out.push(s); return out.join('\r\n'); };
 export async function buildICS(env: Env, origin: string) {
-  const lb = (await env.DB.prepare("SELECT * FROM lb_tasks WHERE deadline != '' AND estado NOT IN ('Backlink Publicado', 'Backlink Publicado - MANUAL_INDEX', 'Cerrado')").all()).results as any[];
-  const red = (await env.DB.prepare("SELECT * FROM redacciones WHERE fecha_entrega != '' AND estado != 'Entregada'").all()).results as any[];
+  const lb = (await env.DB.prepare("SELECT * FROM lb_tasks WHERE deadline != '' AND estado NOT LIKE 'Backlink Publicado%' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ?").bind(YO).all()).results as any[];
+  const red = (await env.DB.prepare("SELECT * FROM redacciones WHERE fecha_entrega != '' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ?").bind(YO).all()).results as any[];
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const ev = (uid: string, date: string, summary: string, desc: string) => [
     'BEGIN:VEVENT', `UID:${uid}@proyectos-eleven`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${date.replace(/-/g, '')}`, `DTEND;VALUE=DATE:${addDays(date, 1).replace(/-/g, '')}`,
@@ -238,8 +280,8 @@ function horaLocal(ms: number) {
 /** Textos de los avisos del día (vencidas, hoy, mañana). Exportada para las pruebas. */
 export async function resumenDeadlines(env: Env, hoy: string) {
   const man = addDays(hoy, 1);
-  const lb = (await env.DB.prepare("SELECT project, anchor, as_code, deadline FROM lb_tasks WHERE deadline != '' AND deadline <= ? AND estado NOT IN ('Backlink Publicado', 'Backlink Publicado - MANUAL_INDEX', 'Cerrado')").bind(man).all()).results as any[];
-  const red = (await env.DB.prepare("SELECT project, tema, fecha_entrega AS deadline FROM redacciones WHERE fecha_entrega != '' AND fecha_entrega <= ? AND estado != 'Entregada'").bind(man).all()).results as any[];
+  const lb = (await env.DB.prepare("SELECT project, anchor, as_code, deadline FROM lb_tasks WHERE deadline != '' AND deadline <= ? AND estado NOT LIKE 'Backlink Publicado%' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ?").bind(man, YO).all()).results as any[];
+  const red = (await env.DB.prepare("SELECT project, tema, fecha_entrega AS deadline FROM redacciones WHERE fecha_entrega != '' AND fecha_entrega <= ? AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ?").bind(man, YO).all()).results as any[];
   const all = [...lb.map(t => ({ d: t.deadline, txt: `${t.project} ${t.anchor || t.as_code || ''}`.trim() })), ...red.map(r => ({ d: r.deadline, txt: `${r.project} ${r.tema}` }))];
   const venc = all.filter(x => x.d < hoy), hoyL = all.filter(x => x.d === hoy), manL = all.filter(x => x.d === man);
   const parts: string[] = [];
@@ -295,6 +337,15 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const tok = path.slice(5).replace(/\.ics$/, ''), cal = await getS(env, 'cal_token');
       if (!cal || !sameStr(tok, cal)) return new Response('Not found', { status: 404 });
       return new Response(await buildICS(env, url.origin), { headers: { 'content-type': 'text/calendar; charset=utf-8', 'cache-control': 'no-store' } });
+    }
+    // importación desde la página de AppSheet (clave de un solo uso guardada en la base)
+    if (path === '/api/import') {
+      const cors = { 'access-control-allow-origin': 'https://www.appsheet.com', 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-import-key', 'access-control-max-age': '600' };
+      if (m === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+      const key = await getS(env, 'import_key'), given = req.headers.get('x-import-key') ?? '';
+      if (m !== 'POST' || !key || key.length < 20 || !sameStr(given, key)) return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401, headers: { ...cors, 'content-type': 'application/json' } });
+      const r = await importAS(env, await body());
+      return new Response(JSON.stringify(r), { headers: { ...cors, 'content-type': 'application/json' } });
     }
     if (path === '/api/state' && m === 'GET') return json({ setup: !(await getS(env, 'pw')) });
     if (path === '/api/setup' && m === 'POST') {

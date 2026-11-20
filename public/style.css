@@ -53,7 +53,7 @@ label{display:block;font-size:12px;font-weight:500;color:var(--ink2)}label>input
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
 .kpi .k{font-size:12px;color:var(--mute);font-weight:500}.kpi .v{font-size:24px;font-weight:600;letter-spacing:-.02em;margin-top:4px}.kpi .d{font-size:12px;color:var(--mute)}
 .kpi.hot .v{color:var(--bad)}
-.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}.toolbar>select,.toolbar>input{width:auto}.toolbar .search{position:relative;flex:1;max-width:340px}.toolbar .search input{padding-left:32px}.toolbar .search svg{position:absolute;left:10px;top:9px;color:var(--faint)}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}.toolbar.wrap{flex-wrap:wrap}.toolbar>select,.toolbar>input{width:auto}.toolbar .search{position:relative;flex:1;max-width:340px}.toolbar .search input{padding-left:32px}.toolbar .search svg{position:absolute;left:10px;top:9px;color:var(--faint)}
 .toolbar .meta{margin-left:auto;color:var(--mute);font-size:12.5px}
 .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--ink2);white-space:nowrap}
 .badge::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--faint)}

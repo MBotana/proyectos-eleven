@@ -13,3 +13,12 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS notification_log (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, date TEXT NOT NULL, sent_at INTEGER NOT NULL, UNIQUE (kind, date))`,
 ];
+
+/** Columnas agregadas después (se suman a bases existentes; si ya están, el error se ignora). */
+export const MIGRATIONS = [
+  `ALTER TABLE lb_tasks ADD COLUMN usuario TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE redacciones ADD COLUMN as_code TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE redacciones ADD COLUMN usuario TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE redacciones ADD COLUMN variante TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE redacciones ADD COLUMN deadline_estado TEXT NOT NULL DEFAULT ''`,
+];
