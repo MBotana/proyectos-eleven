@@ -77,7 +77,7 @@ test('avisos de validación como en AppSheet', () => {
   const b = { id: 'b', project: 'GAL-LIN-1', medio: 'https://www.lamanana.com.ar/nota', as_code: 'GAL-LIN-1-30', deadline: '2026-11-20' };
   const av = avisosLB(a, p, [a, b]);
   assert.equal(av.length, 4);
-  assert.ok(av.some(s => s.startsWith('Medio repetido') && s.includes('GAL-LIN-1-30')));
+  assert.ok(av.some(s => s.startsWith('❗Medio repetido') && s.includes('GAL-LIN-1-30')));
   assert.equal(avisosLB({ ...a, dr: 25, trafico: 900, precio: 90 }, p, [a]).length, 0);
   assert.equal(avisosLB({ ...a, precio: 150000, moneda: 'ARS' }, p, [a]).filter(s => s.startsWith('Precio')).length, 0);
 });
@@ -115,4 +115,18 @@ test('importación desde AppSheet', async () => {
   const t2 = d.lb.find((x: any) => x.id === 'GAL-LIN-1-31');
   assert.equal(t2.estado, 'Backlink Publicado'); assert.equal(t2.publicado, '2026-11-20'); assert.equal(t2.notas, 'nota mía'); assert.equal(t2.dr, 30);
   assert.equal(d.red[0].entregada, '2026-11-02'); assert.equal(d.red[0].usuario, 'Martín Botana');
+});
+
+test('redacción manual de una tarea', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1' })).j.token;
+  const id = (await call(env, '/api/lb', 'POST', { project: 'LAV-LIN-4', estado: 'Gestión de Backlink', anchor: 'pan dulce' }, tok)).j.id;
+  await call(env, '/api/as/done', 'POST', { ids: [1] }, tok);
+  const r = await call(env, '/api/texto', 'POST', { kind: 'lb', ref: id, titulo: 'Pan dulce casero', cuerpo: 'Uno dos tres cuatro, cinco.', lista: true }, tok);
+  assert.equal(r.j.palabras, 5);
+  const t = (await call(env, `/api/texto?kind=lb&ref=${id}`, 'GET', undefined, tok)).j;
+  assert.equal(t.titulo, 'Pan dulce casero');
+  const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.textos[0].palabras, 5);
+  assert.match(d.as_pend.at(-1).change, /Redacción lista/);
+  assert.equal((await call(env, '/api/texto', 'POST', { kind: 'lb', ref: 'no-existe', cuerpo: 'x' }, tok)).status, 404);
 });

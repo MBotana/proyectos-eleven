@@ -21,4 +21,6 @@ export const MIGRATIONS = [
   `ALTER TABLE redacciones ADD COLUMN usuario TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE redacciones ADD COLUMN variante TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE redacciones ADD COLUMN deadline_estado TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE lb_tasks ADD COLUMN url_publicacion TEXT NOT NULL DEFAULT ''`,
+  `CREATE TABLE IF NOT EXISTS textos (kind TEXT NOT NULL, ref TEXT NOT NULL, titulo TEXT NOT NULL DEFAULT '', cuerpo TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', palabras INTEGER NOT NULL DEFAULT 0, lista INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, PRIMARY KEY (kind, ref))`,
 ];

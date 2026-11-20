@@ -1,5 +1,5 @@
 // Proyectos Eleven — app de escritorio (PWA instalable desde Chrome o Edge). Un solo usuario; todo se guarda en el servidor.
-import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO, esCerradoLB, esCerradoRED, avisosLB, hoyEn, addDays, normDomain } from './shared.js';
+import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain } from './shared.js';
 
 const S = {
   token: localStorage.getItem('pe_token') || '', setup: false, data: null, view: localStorage.getItem('pe_view') || 'inicio', calurl: '',
@@ -45,13 +45,21 @@ async function load() {
 }
 const proj = (code) => S.data.projects.find((p) => p.code === code);
 const projs = (tipo) => S.data.projects.filter((p) => p.active && (!tipo || p.tipo === tipo));
+const texto = (kind, id) => S.data.textos?.find((t) => t.kind === kind && t.ref === id);
+const textoTag = (kind, id) => { const t = texto(kind, id); return t && t.palabras ? ` <span class="tag ${t.lista ? 'ok' : ''}" title="Redacción cargada en la app">${t.lista ? 'Redacción lista' : 'Borrador'} · ${t.palabras} pal.</span>` : ''; };
+const pasoTitle = (pasos, e) => { const p = pasos[e]; return p ? `Para avanzar a ${p.sigue}: ${p.falta.join(' · ')}` : ''; };
+function pasoBox(pasos, e) {
+  const p = pasos[e]; if (!p) return '';
+  return `<div class="alert" style="background:var(--acc-bg);border-color:#c7d7fe;margin:0 0 16px"><div style="font-weight:600;font-size:12.5px;color:var(--acc)">Próximo paso: ${h(e)} → ${h(p.sigue)}${p.confirmado ? '' : ' <span class="mute" style="font-weight:400">(a confirmar con las pruebas)</span>'}</div>
+    <ul class="warnlist" style="margin-top:4px">${p.falta.map((f) => `<li style="color:var(--ink2)">• ${h(f)}</li>`).join('')}</ul>${p.botones.length ? `<div class="small mute" style="margin-top:4px">En AppSheet: ${p.botones.map(h).join(' · ')}</div>` : ''}</div>`;
+}
 const estadoOpts = (list, cur) => opts(list.includes(cur) || !cur ? list : [...list, cur], cur);
 const estadoBadge = (e) => { const i = ESTADOS_LB.indexOf(e); const b = /^Backlink Publicado/.test(e) ? 5 : e === 'Cerrado' || e === 'Anulado' ? 7 : i <= 0 ? 1 : i <= 1 ? 2 : i <= 4 ? 3 : 4; return `<span class="badge b${b}">${h(e)}</span>`; };
 const redBadge = (e) => `<span class="badge b${e === 'Cerrado' ? 7 : /^Para CMS/.test(e) ? 5 : /^Entrega/.test(e) ? 3 : e === 'Revisión General' ? 4 : 1}">${h(e)}</span>`;
 function dlTag(d, done) { if (!d) return '<span class="mute">—</span>'; const t = hoy(); if (done) return `<span class="mute">${fmtD(d)}</span>`; return d < t ? `<span class="tag bad">${fmtD(d)}</span>` : d === t ? `<span class="tag warn">Hoy</span>` : d <= addDays(t, 2) ? `<span class="tag warn">${fmtD(d)}</span>` : fmtD(d); }
 
 // ---------- marco ----------
-const VIEWS = [['inicio', 'Inicio'], ['lb', 'Contenidos'], ['red', 'Redacciones'], ['medios', 'Medios y contactos'], ['horas', 'Horas'], ['proyectos', 'Proyectos'], ['sep'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
+const VIEWS = [['inicio', 'Inicio'], ['lb', 'Links'], ['red', 'Redacciones'], ['medios', 'Medios y contactos'], ['horas', 'Horas'], ['proyectos', 'Proyectos'], ['sep'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
 function render() {
   if (!S.token) return renderLogin();
   if (!S.data) { $('#app').innerHTML = '<div class="login"><div class="mute">Cargando…</div></div>'; return; }
@@ -143,7 +151,7 @@ VIEWS_FN.lb = () => {
   const estados = [...new Set([...ESTADOS_LB, ...base.map((t) => t.estado)])];
   const sync = S.data.settings.as_sync_at ? `Copiado de AppSheet el ${new Date(Number(S.data.settings.as_sync_at)).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}` : '';
   return {
-    title: 'Contenidos', sub: `Tareas de link building · ${arr.length} resultado${arr.length === 1 ? '' : 's'}${sync ? ' · ' + sync : ''}`,
+    title: 'Links', sub: `Tareas de link building · ${arr.length} resultado${arr.length === 1 ? '' : 's'}${sync ? ' · ' + sync : ''}`,
     actions: `<button class="btn" data-act="newlb">${ic('plus')}Nueva tarea</button>`,
     body: `<div class="toolbar wrap">
       <select data-f="lbProj"><option value="">Todos los proyectos</option>${opts(projs('LIN').map((p) => p.code), f.lbProj, projs('LIN').map((p) => `${p.code} · ${p.cliente}`))}</select>
@@ -156,18 +164,18 @@ VIEWS_FN.lb = () => {
       <label class="check" style="margin-left:auto"><input type="checkbox" data-f="lbGroup" ${f.lbGroup === '1' ? 'checked' : ''}> Agrupar por proyecto</label></div>
     <div class="card tblwrap"><table class="tbl"><thead><tr>${th('lb', 'as_code', 'Código')}${th('lb', 'anchor', 'Anchor')}${th('lb', 'medio', 'Medio')}${th('lb', 'mail_eleven', 'Mail de contacto')}${th('lb', 'estado_neg', 'Negociación')}${th('lb', 'precio', 'Precio', 'num')}${th('lb', 'deadline', 'Mes plan.')}${f.lbUser ? '' : th('lb', 'usuario', 'Asignado')}${th('lb', 'estado', 'Estado')}</tr></thead><tbody>
       ${agrupar(arr, f.lbUser ? 8 : 9, (x) => { const av = PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb);
-        return `<tr data-open="lb" data-id="${x.id}"><td class="mono">${x.as_code ? h(x.as_code) : `<span class="tag acc">Nueva · ${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
+        return `<tr data-open="lb" data-id="${x.id}"><td class="mono">${x.as_code ? h(x.as_code) : `<span class="tag acc">Nueva · ${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${textoTag('lb', x.id)}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
           <td title="${h(x.medio)}">${h(normDomain(x.medio))}</td><td title="${h(x.mail_eleven)}">${h(x.mail_eleven)}</td><td>${h(x.estado_neg)}</td><td class="num nowrap">${x.precio !== null && x.precio !== undefined ? `${h(x.moneda)} ${fmtN(x.precio)}` : ''}</td>
           <td class="nowrap">${PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? `<span class="mute">${fmtMes(x.deadline)}</span>` : x.deadline && x.deadline < hoy() ? `<span class="tag bad">${fmtMes(x.deadline)}</span>` : fmtMes(x.deadline)}</td>
           ${f.lbUser ? '' : `<td class="nowrap ${x.usuario === YO ? '' : 'mute'}">${h(x.usuario)}</td>`}
-          <td><select data-act="lbestado" data-id="${x.id}">${estadoOpts(ESTADOS_LB, x.estado)}</select></td></tr>`; }, f.lbGroup) || '<tr><td colspan="9" class="empty">No hay tareas con estos filtros.</td></tr>'}</tbody></table></div>`,
+          <td><select data-act="lbestado" data-id="${x.id}" title="${h(pasoTitle(PASOS_LB, x.estado))}">${estadoOpts(ESTADOS_LB, x.estado)}</select></td></tr>`; }, f.lbGroup) || '<tr><td colspan="9" class="empty">No hay tareas con estos filtros.</td></tr>'}</tbody></table></div>`,
   };
 };
 function lbForm(x = {}) {
   const ps = projs('LIN'), p = x.project || S.f.lbProj || ps[0]?.code, pp = proj(p)?.params || {};
   const mails = [...new Set(S.data.lb.map((t) => t.mail_eleven).filter(Boolean))].sort();
   return `<form id="lbf" data-id="${h(x.id || '')}"><div class="dh"><h2>${x.id ? h(x.as_code || 'Tarea de link building') : 'Nueva tarea de link building'}</h2><button type="button" class="x" data-act="close" title="Cerrar (Esc)">${ic('x')}</button></div>
-    <div class="db"><div class="fields">
+    <div class="db">${x.id ? pasoBox(PASOS_LB, x.estado) : ''}<div class="fields">
       <div class="section">Tarea</div>
       <label>Proyecto<select name="project" data-act="lbproj">${opts(ps.map((q) => q.code), p, ps.map((q) => `${q.code} · ${q.cliente}`))}</select></label>
       <label>Código en AppSheet<input name="as_code" class="mono" placeholder="${h(p)}-00" value="${h(x.as_code)}"></label>
@@ -179,6 +187,7 @@ function lbForm(x = {}) {
       <label>Negociación<select name="estado_neg">${estadoOpts(ESTADOS_NEG, x.estado_neg)}</select></label>
       <label class="full">Anchor text<input name="anchor" value="${h(x.anchor)}"></label>
       <label class="full">URL del cliente<input name="url_cliente" type="url" placeholder="https://${h(pp.dominio || '')}" value="${h(x.url_cliente)}"></label>
+      <label class="full">URL de la publicación<input name="url_publicacion" type="url" placeholder="Se completa cuando el medio publica" value="${h(x.url_publicacion)}"></label>
       <div class="section">Medio</div>
       <label>Dominio<input name="medio" placeholder="diario.com.ar" value="${h(x.medio)}"></label>
       <div class="fields" style="gap:10px"><label>DR<input name="dr" type="number" step="any" value="${h(x.dr)}"></label><label>Tráfico<input name="trafico" type="number" step="1" value="${h(x.trafico)}"></label></div>
@@ -190,7 +199,7 @@ function lbForm(x = {}) {
       <label class="full">Notas<textarea name="notas">${h(x.notas)}</textarea></label>
     </div><datalist id="mails">${mails.map((m) => `<option value="${h(m)}">`).join('')}</datalist><datalist id="users">${usuarios([...S.data.lb, ...S.data.red]).map((u) => `<option value="${h(u)}">`).join('')}</datalist>
     <div id="lbav"></div><div class="err" id="ferr"></div></div>
-    <div class="df">${x.id ? `<button type="button" class="btn danger left" data-act="del" data-kind="lb">Borrar</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
+    <div class="df">${x.id ? `<button type="button" class="btn danger" data-act="del" data-kind="lb">Borrar</button><button type="button" class="btn sec left" data-act="redactar" data-kind="lb" data-id="${x.id}" ${puedeRedactarLB(x.estado) ? '' : 'disabled title="Se habilita desde Gestión de Backlink"'}>${ic('red')}Redacción</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
 }
 function lbAvisosVivos() {
   const f = $('#lbf'); if (!f) return;
@@ -215,16 +224,16 @@ VIEWS_FN.red = () => {
       <select data-f="redUser"><option value="">Todos los asignados</option>${opts(usuarios(S.data.red), f.redUser, usuarios(S.data.red).map((u) => (u === YO ? `${u} (yo)` : u)))}</select>
       ${searchBox('redQ', 'Buscar tema o código…')}<label class="check" style="margin-left:auto"><input type="checkbox" data-f="redGroup" ${f.redGroup === '1' ? 'checked' : ''}> Agrupar por proyecto</label></div>
     <div class="card tblwrap"><table class="tbl"><thead><tr>${th('red', 'as_code', 'Código')}${th('red', 'tema', 'Tema')}${th('red', 'subproyecto', 'Subproyecto')}${th('red', 'prioridad', 'Prioridad')}${th('red', 'fecha_entrega', 'Deadline')}${th('red', 'entregada', 'Entregada')}${f.redUser ? '' : th('red', 'usuario', 'Asignado')}${th('red', 'estado', 'Estado')}</tr></thead><tbody>
-      ${agrupar(arr, f.redUser ? 7 : 8, (r) => `<tr data-open="red" data-id="${r.id}"><td class="mono">${r.as_code ? h(r.as_code) : `<span class="tag acc">${pendAS.has(r.id) ? 'Por cargar' : 'Nueva'}</span>`}</td><td title="${h(r.tema)}" style="max-width:340px">${h(r.tema)}</td><td>${h([r.subproyecto, r.variante].filter(Boolean).join(' · '))}</td>
+      ${agrupar(arr, f.redUser ? 7 : 8, (r) => `<tr data-open="red" data-id="${r.id}"><td class="mono">${r.as_code ? h(r.as_code) : `<span class="tag acc">${pendAS.has(r.id) ? 'Por cargar' : 'Nueva'}</span>`}</td><td title="${h(r.tema)}" style="max-width:340px">${h(r.tema)}${textoTag('red', r.id)}</td><td>${h([r.subproyecto, r.variante].filter(Boolean).join(' · '))}</td>
         <td>${r.prioridad === 'Alta' || r.prioridad === 'Urgente' ? `<span class="tag bad">${h(r.prioridad)}</span>` : r.prioridad === 'Baja' ? '<span class="tag">Baja</span>' : h(r.prioridad)}</td>
         <td>${dlTag(r.fecha_entrega, esCerradoRED(r.estado) || !!r.entregada)}</td><td class="mute">${fmtD(r.entregada)}</td>${f.redUser ? '' : `<td class="nowrap ${r.usuario === YO ? '' : 'mute'}">${h(r.usuario)}</td>`}
-        <td><select data-act="redestado" data-id="${r.id}">${estadoOpts(ESTADOS_RED, r.estado)}</select></td></tr>`, f.redGroup) || '<tr><td colspan="8" class="empty">No hay redacciones con estos filtros.</td></tr>'}</tbody></table></div>`,
+        <td><select data-act="redestado" data-id="${r.id}" title="${h(pasoTitle(PASOS_RED, r.estado))}">${estadoOpts(ESTADOS_RED, r.estado)}</select></td></tr>`, f.redGroup) || '<tr><td colspan="8" class="empty">No hay redacciones con estos filtros.</td></tr>'}</tbody></table></div>`,
   };
 };
 function redForm(r = {}) {
   const ps = projs('RED');
   return `<form id="redf" data-id="${h(r.id || '')}"><div class="dh"><h2>${r.id ? 'Redacción' : 'Nueva redacción'}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
-    <div class="db"><p class="small mute" style="margin:0 0 14px">Mismos campos que pide AppSheet en Carga de Redacciones.</p><div class="fields">
+    <div class="db">${r.id ? pasoBox(PASOS_RED, r.estado) : ''}<p class="small mute" style="margin:0 0 14px">Mismos campos que pide AppSheet en Carga de Redacciones.</p><div class="fields">
       <label class="full">Tema *<input name="tema" required value="${h(r.tema)}"></label>
       <label>Código en AppSheet<input name="as_code" class="mono" placeholder="Se completa al cargarla" value="${h(r.as_code)}"></label>
       <label>Asignado a<input name="usuario" value="${h(r.usuario || YO)}"></label>
@@ -240,7 +249,7 @@ function redForm(r = {}) {
       <label>Estado<select name="estado">${estadoOpts(ESTADOS_RED, r.estado || 'Pendiente')}</select></label>
       <label class="full">Notas<textarea name="notas">${h(r.notas)}</textarea></label>
     </div><div class="err" id="ferr"></div></div>
-    <div class="df">${r.id ? `<button type="button" class="btn danger left" data-act="del" data-kind="red">Borrar</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
+    <div class="df">${r.id ? `<button type="button" class="btn danger" data-act="del" data-kind="red">Borrar</button><button type="button" class="btn sec left" data-act="redactar" data-kind="red" data-id="${r.id}">${ic('red')}Redacción</button>` : '<span class="left"></span>'}<button type="button" class="btn sec" data-act="close">Cancelar</button><button class="btn">Guardar</button></div></form>`;
 }
 
 // ---------- Medios y contactos ----------
@@ -359,8 +368,26 @@ function renderTimer() {
 }
 async function setTimer(v) { await api('/api/settings', 'POST', { timer: v ? JSON.stringify(v) : '' }); S.data.settings.timer = v ? JSON.stringify(v) : ''; if (!v) document.title = 'Proyectos Eleven'; }
 
+// ---------- editor de redacción ----------
+const contar = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
+async function abrirRedaccion(kind, id) {
+  const x = S.data[kind].find((o) => o.id === id), t = await api(`/api/texto?kind=${kind}&ref=${encodeURIComponent(id)}`), min = kind === 'lb' ? proj(x.project)?.params?.palabrasMin : null;
+  const titulo = kind === 'lb' ? `${x.as_code || x.project} · ${x.anchor || 'sin anchor'}` : `${x.as_code || x.project} · ${x.tema}`;
+  openDrawer(`<form id="txf" data-kind="${kind}" data-id="${h(id)}" data-min="${h(min ?? '')}"><div class="dh"><h2>Redacción — ${h(titulo)}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
+    <div class="db"><div class="fields">
+      ${kind === 'lb' ? `<div class="full small mute">Anchor: <b>${h(x.anchor)}</b> → ${h(x.url_cliente || 'sin URL del cliente')} · Medio: ${h(normDomain(x.medio))}</div>` : ''}
+      <label class="full">Título<input name="titulo" value="${h(t.titulo)}"></label>
+      <label class="full">Texto<textarea name="cuerpo" style="min-height:52vh;font-size:14px;line-height:1.6">${h(t.cuerpo)}</textarea></label>
+      <div class="full" style="display:flex;gap:12px;align-items:center"><span id="txcount" class="small"></span><label class="check" style="margin-left:auto"><input type="checkbox" name="lista" ${t.lista ? 'checked' : ''}> Lista para pasar a AppSheet</label></div>
+      <label class="full">Documento en AppSheet (link al Google Doc de la tarea, opcional)<input name="url" type="url" value="${h(t.url)}" placeholder="https://docs.google.com/…"></label>
+    </div><div class="err" id="ferr"></div></div>
+    <div class="df"><button type="button" class="btn sec left" data-act="copytxt">${ic('copy')}Copiar texto</button><button type="button" class="btn sec" data-act="close">Cerrar</button><button class="btn">Guardar</button></div></form>`, true);
+  contarVivo();
+}
+function contarVivo() { const f = $('#txf'); if (!f) return; const n = contar(f.cuerpo.value), min = Number(f.dataset.min || 0); $('#txcount').innerHTML = `${n} palabras${min ? ` · mínimo del proyecto: ${min} ${n >= min ? '<span class="tag ok">OK</span>' : `<span class="tag warn">faltan ${min - n}</span>`}` : ''}`; }
+
 // ---------- panel lateral ----------
-function openDrawer(html) { const d = $('#drawer'); d.querySelector('.panel').innerHTML = html; d.classList.add('open'); lbAvisosVivos(); setTimeout(() => d.querySelector('.db input:not([type=hidden]), .db select')?.focus(), 60); }
+function openDrawer(html, wide) { const d = $('#drawer'); d.querySelector('.panel').innerHTML = html; d.querySelector('.panel').classList.toggle('wide', !!wide); d.classList.add('open'); lbAvisosVivos(); setTimeout(() => d.querySelector('.db input:not([type=hidden]), .db select')?.focus(), 60); }
 function closeDrawer() { $('#drawer').classList.remove('open'); }
 const formData = (f) => Object.fromEntries(new FormData(f));
 async function guardar(fn, msg) { const e = $('#ferr'); try { if (e) e.textContent = ''; await fn(); closeDrawer(); if (msg) toast(msg); await load(); } catch (err) { if (e) e.textContent = err.message; else toast(err.message); } }
@@ -380,6 +407,8 @@ document.addEventListener('click', async (ev) => {
     case 'newhours': openDrawer(hoursForm()); break;
     case 'editplan': openDrawer(planForm()); break;
     case 'close': closeDrawer(); break;
+    case 'redactar': try { await abrirRedaccion(el.dataset.kind, el.dataset.id); } catch (e) { toast(e.message); } break;
+    case 'copytxt': { const f = $('#txf'); navigator.clipboard?.writeText((f.titulo.value ? f.titulo.value + '\n\n' : '') + f.cuerpo.value).then(() => toast('Texto copiado')); break; }
     case 'del': { const f = el.closest('form'), k = el.dataset.kind; if (confirm('¿Borrar? No se puede deshacer.')) guardar(() => api(`/api/${k}/${f.dataset.id}`, 'DELETE'), 'Borrado'); break; }
     case 'tstart': try { S.ttype = $('#ttype').value; await setTimer({ project: $('#tproj').value, task_type: $('#ttype').value, start: Date.now() }); renderTimer(); } catch (e) { toast(e.message); } break;
     case 'tstop': {
@@ -419,6 +448,7 @@ document.addEventListener('input', (ev) => {
   const el = ev.target;
   if (el.dataset.f && el.type === 'search') { S.f[el.dataset.f] = el.value; clearTimeout(S.qt); S.qt = setTimeout(() => { const pos = el.selectionStart; render(); const n = document.querySelector(`[data-f="${el.dataset.f}"]`); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 200); return; }
   if (el.closest('#lbf')) lbAvisosVivos();
+  if (el.closest('#txf')) contarVivo();
 });
 document.addEventListener('submit', async (ev) => {
   ev.preventDefault(); const f = ev.target;
@@ -429,6 +459,7 @@ document.addEventListener('submit', async (ev) => {
   }
   if (f.id === 'lbf') return guardar(() => api('/api/lb', 'POST', { ...formData(f), id: f.dataset.id || undefined }), 'Tarea guardada');
   if (f.id === 'redf') return guardar(() => { const d = formData(f); return api('/api/red', 'POST', { ...d, ia: d.ia === '1', id: f.dataset.id || undefined }); }, 'Redacción guardada');
+  if (f.id === 'txf') return guardar(() => api('/api/texto', 'POST', { kind: f.dataset.kind, ref: f.dataset.id, titulo: f.titulo.value, cuerpo: f.cuerpo.value, url: f.url.value, lista: f.lista.checked }), 'Redacción guardada');
   if (f.id === 'hrf') return guardar(() => api('/api/hours', 'POST', { ...formData(f), id: f.dataset.id || undefined }), 'Horas guardadas');
   if (f.id === 'planf') {
     const d = formData(f), rows = Object.keys(d).filter((k) => /^p\d+$/.test(k)).map((k) => { const i = k.slice(1), [project, task_type] = d[k].split('|'); return { project, task_type, hours: d['h' + i], units: d['u' + i] }; });

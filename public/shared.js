@@ -72,18 +72,47 @@ const num = (v) => (v === '' || v === null || v === undefined || isNaN(Number(v)
 export function avisosLB(t, proyecto, todas = []) {
   const p = (proyecto && proyecto.params) || {}, out = [];
   const dr = num(t.dr), traf = num(t.trafico), precio = num(t.precio);
-  if (num(p.drMin) !== null && dr !== null && dr < Number(p.drMin)) out.push(`DR ${dr} menor al mínimo (${p.drMin}): necesita validación del líder.`);
-  if (num(p.trafMin) !== null && traf !== null && traf < Number(p.trafMin)) out.push(`Tráfico ${traf} menor al mínimo (${p.trafMin}).`);
-  if (num(p.precioMaxUSD) !== null && precio !== null && (t.moneda || 'USD') === 'USD' && precio > Number(p.precioMaxUSD)) out.push(`Precio USD ${precio} mayor al máximo (${p.precioMaxUSD}).`);
   const dom = normDomain(t.medio);
   if (dom) {
     const dias = num(p.repDias) ?? 0, ref = Date.parse((t.deadline || t.created || '').slice(0, 10)) || Date.now();
-    const rep = todas.find((o) => o.id !== t.id && o.project === t.project && normDomain(o.medio) === dom &&
+    const rep = todas.find((o) => o.id !== t.id && o.project === t.project && normDomain(o.medio) === dom && o.estado !== 'Anulado' &&
       (!dias || Math.abs((Date.parse((o.deadline || o.created || '').slice(0, 10)) || ref) - ref) < dias * 864e5));
-    if (rep) out.push(`Medio repetido: ${dom} ya está en ${rep.as_code || 'otra tarea'} de este proyecto${dias ? ` (no se repite antes de ${dias} días)` : ''}.`);
+    // Texto igual al de AppSheet
+    if (rep) out.push(`❗Medio repetido: ya está en otra tarea de este proyecto y todavía no puede repetirse. Revise qué tarea debe conservarlo; mientras tanto esta no va a poder avanzar. (${rep.as_code || 'otra tarea'})`);
   }
+  if (num(p.drMin) !== null && dr !== null && dr < Number(p.drMin)) out.push(`❗ El valor de DR ingresado (${dr.toFixed(2)}) es menor al mínimo permitido (${p.drMin}). De continuar será necesaria la validación del líder del proyecto.`);
+  // Estos dos no los vi escritos en AppSheet: texto propio
+  if (num(p.trafMin) !== null && traf !== null && traf < Number(p.trafMin)) out.push(`Tráfico ${traf} menor al mínimo del proyecto (${p.trafMin}).`);
+  if (num(p.precioMaxUSD) !== null && precio !== null && (t.moneda || 'USD') === 'USD' && precio > Number(p.precioMaxUSD)) out.push(`Precio USD ${precio} mayor al máximo del proyecto (${p.precioMaxUSD}).`);
   return out;
 }
+
+/**
+ * Qué pide AppSheet en cada estado de una tarea de link building (relevado el 20/11/2026 mirando tareas reales).
+ * botones = acciones que muestra AppSheet en ese estado; falta = qué completar para que aparezca "Continuar".
+ * confirmado: false = deducido, falta verificarlo con las tareas de prueba.
+ */
+export const PASOS_LB = {
+  'No Iniciado': { botones: ['Edit'], falta: ['URL del cliente', 'Anchor text', 'Medio (dominio, tráfico, DR)'], sigue: 'Gestión de Backlink', confirmado: false },
+  'Gestión de Backlink': { botones: ['Crear redacción', 'Solicitar Negociación', 'Edit'], falta: ['Negociación en "Acuerdo Alcanzado" (aparece "Continuar")', 'Sin avisos de medio repetido', 'Redacción creada'], sigue: 'Para Enviar', confirmado: false },
+  'Para Enviar': { botones: ['Auditar Redacción', 'Continuar', 'Edit'], falta: ['Redacción auditada', 'Pago solicitado (se genera en "Pagos")'], sigue: 'Enviado a Medio', confirmado: false },
+  'FLAG NO_EDITION_DOC': { botones: ['Auditar Redacción', 'Continuar'], falta: ['El documento de redacción no está editado/auditado: auditar la redacción'], sigue: 'Para Enviar', confirmado: false },
+  'Enviado a Medio': { botones: ['Continuar', 'Edit'], falta: ['Que el medio publique la nota'], sigue: 'Backlink Publicado', confirmado: false },
+  'Revisión y Validación': { botones: [], falta: ['Validación del líder del proyecto (por DR o parámetros fuera de rango)'], sigue: 'Gestión de Backlink', confirmado: false },
+  'Backlink Publicado': { botones: ['Continuar', 'Edit'], falta: ['URL de la publicación', 'Pago / comprobante'], sigue: 'Cerrado', confirmado: false },
+  'Backlink Publicado - MANUAL_INDEX': { botones: ['Continuar'], falta: ['Indexación manual de la URL publicada'], sigue: 'Cerrado', confirmado: false },
+  'Backlink Publicado - Sin Pago': { botones: ['Continuar'], falta: ['Registrar o eximir el pago'], sigue: 'Cerrado', confirmado: false },
+  'Backlink Publicado - REQUIERE ESQUEMA PRECIOS': { botones: [], falta: ['Que Operaciones cargue el esquema de precios del cliente'], sigue: 'Cerrado', confirmado: false },
+};
+export const PASOS_RED = {
+  'Revisión General': { botones: ['Edit'], falta: ['Revisión del texto'], sigue: 'Entrega', confirmado: false },
+  'Entrega': { botones: ['Edit'], falta: ['Entregable listo (Post_Entregable)'], sigue: 'Para CMS', confirmado: false },
+  'Entrega - REQUIERE ESQUEMA PRECIOS': { botones: ['Edit'], falta: ['Que Operaciones cargue el esquema de precios'], sigue: 'Para CMS', confirmado: false },
+  'Para CMS': { botones: ['Edit'], falta: ['Cargar la pieza en el CMS del cliente'], sigue: 'Cerrado', confirmado: false },
+  'Para CMS - REQUIERE ESQUEMA PRECIOS': { botones: ['Edit'], falta: ['Esquema de precios + carga en CMS'], sigue: 'Cerrado', confirmado: false },
+};
+/** Desde qué estado se puede cargar la redacción de un link (en AppSheet aparece "Crear redacción" en Gestión de Backlink). */
+export const puedeRedactarLB = (estado) => estado !== 'No Iniciado' && estado !== 'Anulado';
 
 /** Fecha AAAA-MM-DD en una zona horaria. */
 export function hoyEn(tz = 'America/Argentina/Buenos_Aires', ms = Date.now()) {

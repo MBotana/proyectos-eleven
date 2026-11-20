@@ -85,6 +85,7 @@ label{display:block;font-size:12px;font-weight:500;color:var(--ink2)}label>input
 #drawer .scrim{position:absolute;inset:0;background:rgba(16,24,40,.28);opacity:0;transition:opacity .15s}
 #drawer.open .scrim{opacity:1}
 #drawer .panel{position:absolute;top:0;right:0;bottom:0;width:580px;max-width:92vw;background:var(--panel);border-left:1px solid var(--line);transform:translateX(100%);visibility:hidden;transition:transform .18s ease,visibility .18s;display:flex;flex-direction:column}
+#drawer .panel.wide{width:900px}
 #drawer.open .panel{transform:none;visibility:visible;box-shadow:-12px 0 32px rgba(16,24,40,.12)}
 #drawer form{display:flex;flex-direction:column;min-height:0;flex:1}
 .dh{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line)}.dh h2{font-size:15px;font-weight:600;margin:0}.dh .x{margin-left:auto;background:none;border:0;color:var(--mute);padding:4px;border-radius:6px;display:flex}.dh .x:hover{background:#f2f4f7}

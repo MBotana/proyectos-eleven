@@ -102,10 +102,10 @@ async function logAS(env: Env, entity: 'lb' | 'red', ref: string, label: string,
 }
 
 // ---------- tareas de link building ----------
-const LB_FIELDS = ['project', 'as_code', 'estado', 'usuario', 'tipo_servicio', 'anchor', 'url_cliente', 'medio', 'dr', 'trafico', 'precio', 'moneda', 'estado_neg', 'mail_eleven', 'contacto_medio', 'deadline', 'notas'] as const;
+const LB_FIELDS = ['project', 'as_code', 'estado', 'usuario', 'url_publicacion', 'tipo_servicio', 'anchor', 'url_cliente', 'medio', 'dr', 'trafico', 'precio', 'moneda', 'estado_neg', 'mail_eleven', 'contacto_medio', 'deadline', 'notas'] as const;
 function cleanLB(b: any) {
   return {
-    project: str(b.project, 40), as_code: str(b.as_code, 40).toUpperCase(), estado: str(b.estado, 80) || 'No Iniciado', usuario: str(b.usuario, 80) || YO,
+    project: str(b.project, 40), as_code: str(b.as_code, 40).toUpperCase(), estado: str(b.estado, 80) || 'No Iniciado', usuario: str(b.usuario, 80) || YO, url_publicacion: str(b.url_publicacion, 500),
     tipo_servicio: oneOf(b.tipo_servicio, TIPOS_SERVICIO, 'Intervalo métrica 21-40'), anchor: str(b.anchor, 300), url_cliente: str(b.url_cliente, 500),
     medio: str(b.medio, 200), dr: numOrNull(b.dr), trafico: numOrNull(b.trafico), precio: numOrNull(b.precio), moneda: oneOf(b.moneda, [...MONEDAS, ''], 'USD'),
     estado_neg: str(b.estado_neg, 60), mail_eleven: str(b.mail_eleven, 120).toLowerCase(), contacto_medio: str(b.contacto_medio, 200),
@@ -320,6 +320,7 @@ async function allData(env: Env) {
     hours: await q('SELECT * FROM hours ORDER BY date DESC, created_at DESC'),
     plan: await q('SELECT * FROM plan ORDER BY month, project, task_type'),
     as_pend: await q('SELECT * FROM as_log WHERE done = 0 ORDER BY at'),
+    textos: await q('SELECT kind, ref, palabras, lista, updated_at FROM textos'),
     settings,
   };
 }
@@ -383,6 +384,21 @@ export async function handle(req: Request, env: Env): Promise<Response> {
         if (r) await logAS(env, del[1] as 'lb' | 'red', del[2], r.as_code || `${r.project} · ${r.anchor || r.tema || ''}`, 'Borrada en la app (revisar si hay que borrarla en AppSheet)');
       }
       await env.DB.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(del[2]).run(); return json({ ok: true });
+    }
+    if (path === '/api/texto' && m === 'GET') {
+      const r = await env.DB.prepare('SELECT * FROM textos WHERE kind = ? AND ref = ?').bind(url.searchParams.get('kind') ?? '', url.searchParams.get('ref') ?? '').first();
+      return json(r ?? { titulo: '', cuerpo: '', url: '', palabras: 0, lista: 0 });
+    }
+    if (path === '/api/texto' && m === 'POST') {
+      const b = await body(), kind = b.kind === 'red' ? 'red' : 'lb', ref = str(b.ref, 60);
+      const t = await env.DB.prepare(`SELECT * FROM ${kind === 'lb' ? 'lb_tasks' : 'redacciones'} WHERE id = ?`).bind(ref).first();
+      if (!t) return fail('La tarea no existe', 404);
+      const cuerpo = typeof b.cuerpo === 'string' ? b.cuerpo.slice(0, 200000) : '', palabras = (cuerpo.match(/[\p{L}\p{N}]+/gu) || []).length;
+      const old = await env.DB.prepare('SELECT lista FROM textos WHERE kind = ? AND ref = ?').bind(kind, ref).first();
+      await env.DB.prepare('INSERT INTO textos (kind, ref, titulo, cuerpo, url, palabras, lista, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(kind, ref) DO UPDATE SET titulo = excluded.titulo, cuerpo = excluded.cuerpo, url = excluded.url, palabras = excluded.palabras, lista = excluded.lista, updated_at = excluded.updated_at')
+        .bind(kind, ref, str(b.titulo, 300), cuerpo, str(b.url, 500), palabras, b.lista ? 1 : 0, Date.now()).run();
+      if (b.lista && !(old && old.lista)) await logAS(env, kind, ref, t.as_code || `${t.project} · ${t.anchor || t.tema || ''}`, `Redacción lista en la app (${palabras} palabras): pasarla al documento de AppSheet`);
+      return json({ ok: true, palabras });
     }
     if (path === '/api/projects' && m === 'POST') {
       const b = await body(); if (!Array.isArray(b.projects)) return fail('Faltan los proyectos');
