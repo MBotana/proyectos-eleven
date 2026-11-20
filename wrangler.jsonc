@@ -1,0 +1,16 @@
+{
+  "name": "proyectos-eleven",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/cal/*"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "proyectos-eleven", "database_id": "52417ff5-f552-4c09-8867-b59e77e70f74" }
+  ],
+  "triggers": { "crons": ["0 * * * *"] },
+  "observability": { "enabled": true }
+}
