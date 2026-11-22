@@ -175,12 +175,12 @@ test('compilado de medios: importa lo que importa y valida por proyecto', async 
   assert.match(aptoMedio(d, xub, [], '2026-11-22').motivos[0], /País/);
   assert.match(aptoMedio(d, gal, [{ project: 'GAL-LIN-1', medio: 'https://diario.com.ar/nota', estado: 'Backlink Publicado', publicado: '2026-10-01', as_code: 'GAL-LIN-1-9' }], '2026-11-22').motivos.join(), /Ya usado/);
   // planificación: comparte medio entre proyectos y respeta presupuesto
-  const projects = PROYECTOS_INICIALES.filter((p: any) => ['GAL-LIN-1', 'NAV-LIN-5'].includes(p.code)).map((p: any) => ({ ...p, active: 1, params: { ...p.params, presupuestoUSD: 100 } }));
-  const medios = [d, { dominio: 'otro.com.ar', mail: 'x@y', dr: 30, trafico: 5000, pais: 'Argentina', precio_usd: 90 }, { dominio: 'solonav.com.ar', mail: 'z@y', dr: 5, trafico: 400, pais: 'Argentina', precio_usd: 20 }];
+  const projects = PROYECTOS_INICIALES.filter((p: any) => ['GAL-LIN-1', 'NAV-LIN-5'].includes(p.code)).map((p: any) => ({ ...p, active: 1, params: { ...p.params, costos: { '2026-12': { gastado: 0, tope: 150000 } } } }));
+  const medios = [d, { dominio: 'otro.com.ar', mail: 'x@y', dr: 30, trafico: 5000, pais: 'Argentina', precio_usd: 90 }, { dominio: 'solonav.com.ar', mail: 'z@y', dr: 5, trafico: 400, pais: 'Argentina', precio_usd: 20 }, { dominio: 'br.com', pais: 'Brasil', moneda: 'ARS', precio: 150000, precio_usd: 100 }];
   const pl = planificar({ projects, medios, lb: [], plan: [{ month: '2026-12', project: 'GAL-LIN-1', task_type: 'A - Creación de links', units: 1 }, { month: '2026-12', project: 'NAV-LIN-5', task_type: 'A - Creación de links', units: 2 }], month: '2026-12', hoy: '2026-11-22' });
   const g = pl.proyectos.find((p: any) => p.code === 'GAL-LIN-1'), n = pl.proyectos.find((p: any) => p.code === 'NAV-LIN-5');
   assert.equal(g.items[0].dominio, 'diario.com.ar'); assert.deepEqual(g.items[0].tambien, ['NAV-LIN-5']);
-  assert.equal(n.items.length, 2); assert.ok(n.total <= 100, 'dentro del presupuesto ' + n.total);
+  assert.equal(pl.tipoCambio, 1500); assert.equal(n.items.length, 2); assert.ok(n.total <= 150000, 'dentro del tope ' + n.total);
   // servidor
   const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1' })).j.token;
   assert.equal((await call(env, '/api/medios/import', 'POST', { rows: ms, reset: true, last: true }, tok)).j.n, 3);

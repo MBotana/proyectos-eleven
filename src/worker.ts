@@ -4,7 +4,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SCHEMA, MIGRATIONS } from './schema.ts';
 import { PROMPTS_INICIALES, PROMPTS_VERSION } from './prompts.ts';
-import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays, tipoHoras, QUIEN } from '../public/shared.js';
+import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays, tipoHoras, QUIEN, DOC_EDITABLE_LB } from '../public/shared.js';
 
 export interface Env { DB: any; ASSETS?: any }
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -415,10 +415,10 @@ export function elegirModelos(lista: string[]) {
   const img = lista.filter(n => /^gemini-.*image/.test(n) && !/preview/.test(n)).sort((a, b) => ver(b) - ver(a) || (/flash/.test(b) ? 1 : 0) - (/flash/.test(a) ? 1 : 0));
   return { texto: txt[0] || '', imagen: img[0] || lista.find(n => /image/.test(n)) || '' };
 }
-async function gemGenerar(env: Env, model: string, prompt: string, imagen = false) {
+async function gemGenerar(env: Env, model: string, prompt: string, imagen = false, aspecto = '16:9') {
   const r = await fetch(`${GEM}/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST', headers: { 'x-goog-api-key': await gemKey(env), 'content-type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: imagen ? { responseModalities: ['IMAGE'] } : { temperature: 0.8 } }),
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: imagen ? { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: aspecto } } : { temperature: 0.8 } }),
   });
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j?.error?.message || `Gemini respondió ${r.status}`), { status: 502 });
@@ -491,7 +491,7 @@ export async function iaImagen(env: Env, b: any) {
   const tpl = (await promptDe(env, t.project, kind === 'red' ? [`imagen:${v.tipo_pieza}`, 'imagen'] : ['imagen'])) || PROMPT_BASE.imagen;
   const model = (await getS(env, 'gemini_model_imagen')) || elegirModelos(await gemModelos(env)).imagen, t0 = Date.now();
   if (!model) throw Object.assign(new Error('Tu cuenta de Gemini no tiene un modelo de imágenes disponible'), { status: 400 });
-  const { img } = await gemGenerar(env, model, rellenar(tpl, v), true);
+  const { img } = await gemGenerar(env, model, rellenar(tpl, v), true, kind === 'lb' ? '3:2' : '16:9');
   if (!img) throw Object.assign(new Error('Gemini no devolvió una imagen (probá de nuevo o ajustá el prompt)'), { status: 502 });
   await env.DB.prepare('DELETE FROM imagenes WHERE kind = ? AND ref = ?').bind(kind, ref).run();
   const CH = 600_000;
@@ -512,8 +512,9 @@ async function enviarDoc(env: Env, b: any) {
   const t: any = await env.DB.prepare(`SELECT * FROM ${kind === 'lb' ? 'lb_tasks' : 'redacciones'} WHERE id = ?`).bind(ref).first();
   const tx: any = await env.DB.prepare('SELECT * FROM textos WHERE kind = ? AND ref = ?').bind(kind, ref).first();
   if (!t || !tx?.cuerpo) throw Object.assign(new Error('No hay texto para enviar'), { status: 400 });
+  if (kind === 'lb' && !DOC_EDITABLE_LB.includes(t.estado)) throw Object.assign(new Error(`El documento solo se puede editar en ${DOC_EDITABLE_LB.join(' o ')} (la tarea está en ${t.estado})`), { status: 400 });
   const doc = str(b.doc_url, 500) || tx.url || t.doc_url; const img = b.conImagen ? await imagenDe(env, kind, ref) : null, t0 = Date.now();
-  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, redirect: 'follow', body: JSON.stringify({ secret, doc, codigo: t.as_code, titulo: tx.titulo, cuerpo: tx.cuerpo, imagen: img }) });
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, redirect: 'follow', body: JSON.stringify({ secret, doc, codigo: t.as_code, tipo: kind === 'lb' ? 'REDACCIÓNLINKBUILDING' : 'REDACCIÓN', titulo: tx.titulo, cuerpo: tx.cuerpo, imagen: img }) });
   const j: any = await r.json().catch(() => ({ error: 'El script no respondió JSON (¿está publicado como aplicación web?)' }));
   if (!r.ok || j.error) throw Object.assign(new Error(j.error || `El script respondió ${r.status}`), { status: 502 });
   if (j.doc && j.doc !== tx.url) await env.DB.prepare('UPDATE textos SET url = ? WHERE kind = ? AND ref = ?').bind(j.doc, kind, ref).run();
@@ -692,8 +693,9 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (path === '/api/projects' && m === 'POST') {
       const b = await body(); if (!Array.isArray(b.projects)) return fail('Faltan los proyectos');
       for (const p of b.projects) {
-        const pr = p.params || {}, params = { drMin: numOrNull(pr.drMin), trafMin: numOrNull(pr.trafMin), precioMaxUSD: numOrNull(pr.precioMaxUSD), repDias: numOrNull(pr.repDias), palabrasMin: numOrNull(pr.palabrasMin), presupuestoUSD: numOrNull(pr.presupuestoUSD), dominio: str(pr.dominio, 120), paises: str(pr.paises, 120), servicio: str(pr.servicio, 60) };
-        await env.DB.prepare('UPDATE projects SET cliente = ?, active = ?, params = ? WHERE code = ?').bind(str(p.cliente, 80), p.active ? 1 : 0, JSON.stringify(params), str(p.code, 40)).run();
+        const prev = JSON.parse(((await env.DB.prepare('SELECT params FROM projects WHERE code = ?').bind(str(p.code, 40)).first()) as any)?.params || '{}');
+        const pr = p.params || {}, params = { drMin: numOrNull(pr.drMin), trafMin: numOrNull(pr.trafMin), precioMaxUSD: numOrNull(pr.precioMaxUSD), repDias: numOrNull(pr.repDias), palabrasMin: numOrNull(pr.palabrasMin), linksMes: numOrNull(pr.linksMes), dominio: str(pr.dominio, 120), paises: str(pr.paises, 120), servicio: str(pr.servicio, 60) };
+        await env.DB.prepare('UPDATE projects SET cliente = ?, active = ?, params = ? WHERE code = ?').bind(str(p.cliente, 80), p.active ? 1 : 0, JSON.stringify({ ...prev, ...params, ...(pr.costos && typeof pr.costos === 'object' ? { costos: pr.costos, costosAt: hoyEn(TZ) } : {}), ...(numOrNull(pr.presupuestoMensualARS) !== null ? { presupuestoMensualARS: numOrNull(pr.presupuestoMensualARS), costoObjetivo: numOrNull(pr.costoObjetivo) ?? 30 } : {}) }), str(p.code, 40)).run();
       }
       return json({ ok: true });
     }

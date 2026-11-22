@@ -1,5 +1,5 @@
 // Proyectos Eleven — app de escritorio (PWA instalable desde Chrome o Edge). Un solo usuario; todo se guarda en el servidor.
-import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain, compiladoAMedios, aptoMedio, planificar, alertas, QUIEN } from './shared.js';
+import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain, compiladoAMedios, aptoMedio, planificar, alertas, QUIEN, DOC_EDITABLE_LB } from './shared.js';
 
 const S = {
   token: localStorage.getItem('pe_token') || '', setup: false, data: null, view: localStorage.getItem('pe_view') || 'inicio', calurl: '',
@@ -332,9 +332,9 @@ function planForm() {
 VIEWS_FN.proyectos = () => ({
   title: 'Proyectos', sub: 'Proyectos habilitados en AppSheet y los topes que valida cada uno',
   actions: `<button class="btn" data-act="saveproj">Guardar cambios</button>`,
-  body: `<form id="projf"><div class="card"><table class="tbl"><thead><tr><th>Activo</th><th>Proyecto</th><th>Cliente</th><th>Dominio</th><th>Países</th><th class="num">DR mín.</th><th class="num">Tráfico mín.</th><th class="num">USD máx.</th><th class="num">Repetir (días)</th><th class="num">Palabras</th><th class="num">Presupuesto USD/mes</th></tr></thead><tbody>
+  body: `<form id="projf"><div class="card"><table class="tbl"><thead><tr><th>Activo</th><th>Proyecto</th><th>Cliente</th><th>Dominio</th><th>Países</th><th class="num">DR mín.</th><th class="num">Tráfico mín.</th><th class="num">USD máx.</th><th class="num">Repetir (días)</th><th class="num">Palabras</th><th class="num">Links/mes</th></tr></thead><tbody>
     ${S.data.projects.map((p) => `<tr data-code="${h(p.code)}"><td><input type="checkbox" name="active" ${p.active ? 'checked' : ''}></td><td class="mono">${h(p.code)}</td><td><input name="cliente" value="${h(p.cliente)}" style="width:120px;height:30px"></td>
-      ${p.tipo === 'LIN' ? `<td><input name="dominio" value="${h(p.params.dominio)}" style="width:150px;height:30px"></td><td><input name="paises" value="${h(p.params.paises)}" style="width:130px;height:30px"></td>${['drMin', 'trafMin', 'precioMaxUSD', 'repDias', 'palabrasMin', 'presupuestoUSD'].map((k) => `<td class="num"><input type="number" step="any" name="${k}" value="${h(p.params[k] ?? '')}" style="width:66px;height:30px;text-align:right"></td>`).join('')}<input type="hidden" name="servicio" value="${h(p.params.servicio)}">` : '<td colspan="8" class="mute">Proyecto de redacción</td>'}</tr>`).join('')}
+      ${p.tipo === 'LIN' ? `<td><input name="dominio" value="${h(p.params.dominio)}" style="width:150px;height:30px"></td><td><input name="paises" value="${h(p.params.paises)}" style="width:130px;height:30px"></td>${['drMin', 'trafMin', 'precioMaxUSD', 'repDias', 'palabrasMin', 'linksMes'].map((k) => `<td class="num"><input type="number" step="any" name="${k}" value="${h(p.params[k] ?? '')}" style="width:66px;height:30px;text-align:right"></td>`).join('')}<input type="hidden" name="servicio" value="${h(p.params.servicio)}">` : '<td colspan="8" class="mute">Proyecto de redacción</td>'}</tr>`).join('')}
     </tbody></table></div></form><p class="small mute">Valores tomados de "Parámetros del Proyecto" en AppSheet el 20/11/2026. Un campo vacío no se controla.</p>`,
 });
 
@@ -421,18 +421,20 @@ VIEWS_FN.plan = () => {
     const porMail = {};
     for (const p of d.proyectos) for (const it of p.items) (porMail[it.mail || '(sin mail)'] ||= []).push({ ...it, code: p.code });
     const sinFalta = d.proyectos.filter((p) => !p.falta && !p.items.length);
-    res = `${sinFalta.length ? `<p class="small mute" style="margin-top:0">Sin links pendientes en ${mesLargo(mes)}: ${sinFalta.map((p) => p.code).join(', ')}</p>` : ''}<div class="cols c11" style="margin-top:0">${d.proyectos.filter((p) => p.falta || p.items.length).map((p) => `<div class="card"><div class="ch"><h2 class="mono">${h(p.code)}</h2><span class="sub">${h(p.cliente)} · ${p.items.length} de ${p.falta} links · ${p.presupuesto !== null ? `USD ${fmtN(p.total)} de ${fmtN(p.disponible)} disponibles` : `USD ${fmtN(p.total)} (sin presupuesto cargado)`}</span></div>
-      ${p.items.length ? `<div class="tblwrap"><table class="tbl"><thead><tr><th>Medio</th><th>Mail de contacto</th><th class="num">DR</th><th class="num">Tráfico</th><th class="num">USD</th><th>También en</th></tr></thead><tbody>${p.items.map((it) => `<tr><td>${h(it.dominio)}</td><td class="small">${h(it.mail)}</td><td class="num">${fmtN(it.dr, 0)}</td><td class="num">${fmtN(it.trafico, 0)}</td><td class="num">${fmtN(it.precio_usd)}</td><td class="nowrap">${it.tambien.map((c) => `<span class="tag acc mono">${h(c.replace('-LIN-', '·'))}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty">${p.falta ? 'No hay medios con precio que entren en el presupuesto.' : 'Sin links pendientes este mes.'}</div>`}
+    res = `${sinFalta.length ? `<p class="small mute" style="margin-top:0">Sin links pendientes en ${mesLargo(mes)}: ${sinFalta.map((p) => p.code).join(', ')}</p>` : ''}<div class="cols c11" style="margin-top:0">${d.proyectos.filter((p) => p.falta || p.items.length).map((p) => `<div class="card"><div class="ch"><h2 class="mono">${h(p.code)}</h2><span class="sub">${h(p.cliente)} · ${p.items.length} de ${p.falta} links · ${p.disponible !== null ? `$ ${fmtN(p.total, 0)} de $ ${fmtN(p.disponible, 0)} disponibles` : `$ ${fmtN(p.total, 0)} (sin tope cargado)`}</span></div>
+      ${p.items.length ? `<div class="tblwrap"><table class="tbl"><thead><tr><th>Medio</th><th>Mail de contacto</th><th class="num">DR</th><th class="num">Tráfico</th><th class="num">Costo</th><th>También en</th></tr></thead><tbody>${p.items.map((it) => `<tr><td>${h(it.dominio)}</td><td class="small">${h(it.mail)}</td><td class="num">${fmtN(it.dr, 0)}</td><td class="num">${fmtN(it.trafico, 0)}</td><td class="num nowrap" title="USD ${fmtN(it.precio_usd)}">$ ${fmtN(it.ars, 0)}</td><td class="nowrap">${it.tambien.map((c) => `<span class="tag acc mono">${h(c.replace('-LIN-', '·'))}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty">${p.falta ? 'No hay medios con precio que entren en el presupuesto.' : 'Sin links pendientes este mes.'}</div>`}
       ${p.alternativas.length && p.items.length < p.falta ? `<div class="cb small"><b>Para negociar (sin precio):</b> ${p.alternativas.slice(0, 8).map((m) => `${h(m.dominio)} <span class="mute">(DR ${fmtN(m.dr, 0)} · ${h(m.mail || 'sin mail')})</span>`).join(' · ')}</div>` : ''}</div>`).join('')}</div>
       <div class="card" style="margin-top:20px"><div class="ch"><h2>Por mail de contacto</h2><span class="sub">Para escribir una vez a cada medio aunque sea para varios proyectos</span></div><table class="tbl"><tbody>
-      ${Object.entries(porMail).sort((a, b) => b[1].length - a[1].length).map(([mail, arr]) => `<tr class="grp"><td colspan="4">${h(mail)} <span class="mute" style="font-weight:400">· ${arr.length} link${arr.length > 1 ? 's' : ''}</span></td></tr>${arr.map((it) => `<tr><td>${h(it.dominio)}</td><td class="mono">${h(it.code)}</td><td class="num">USD ${fmtN(it.precio_usd)}</td><td class="mute small">DR ${fmtN(it.dr, 0)} · ${fmtN(it.trafico, 0)} visitas</td></tr>`).join('')}`).join('')}</tbody></table></div>`;
+      ${Object.entries(porMail).sort((a, b) => b[1].length - a[1].length).map(([mail, arr]) => `<tr class="grp"><td colspan="4">${h(mail)} <span class="mute" style="font-weight:400">· ${arr.length} link${arr.length > 1 ? 's' : ''}</span></td></tr>${arr.map((it) => `<tr><td>${h(it.dominio)}</td><td class="mono">${h(it.code)}</td><td class="num">$ ${fmtN(it.ars, 0)}</td><td class="mute small">DR ${fmtN(it.dr, 0)} · ${fmtN(it.trafico, 0)} visitas</td></tr>`).join('')}`).join('')}</tbody></table></div>`;
   }
   return {
     title: 'Planificación', sub: `Links de ${mesLargo(mes)} según presupuesto y compilado de medios ${badge}`,
     actions: `<input type="month" data-f="planMes" value="${h(mes)}" style="width:auto"><button class="btn sec" data-act="planarmar">${ic('plan')}${d ? 'Volver a armar' : 'Armar planificación'}</button>${d ? `<button class="btn" data-act="planvalidar" ${estado === 'pedida' ? 'disabled' : ''}>Validar con Claude</button>` : ''}`,
-    body: `<div class="card"><div class="ch"><h2>Presupuesto y cupo de ${mesLargo(mes)}</h2><span class="sub">Links: plan de unidades "A - Creación de links" del mes</span></div><table class="tbl"><thead><tr><th>Proyecto</th><th>Cliente</th><th class="num">Links del plan</th><th class="num">Ya planificados</th><th class="num">Presupuesto mensual (USD)</th><th class="num">USD máx. por link</th></tr></thead><tbody>
-      ${lin.map((p) => `<tr><td class="mono">${h(p.code)}</td><td>${h(p.cliente)}</td><td class="num">${unidades(p.code)}</td><td class="num">${S.data.lb.filter((t) => t.project === p.code && t.estado !== 'Anulado' && (t.deadline || '').startsWith(mes)).length}</td><td class="num"><input type="number" step="1" min="0" class="presu" data-code="${h(p.code)}" value="${h(p.params.presupuestoUSD ?? '')}" style="width:100px;height:30px;text-align:right"></td><td class="num mute">${p.params.precioMaxUSD ?? '—'}</td></tr>`).join('')}</tbody></table>
-      <div class="cb small mute" style="display:flex;gap:12px;align-items:center">Editá las unidades en Horas → Editar plan del mes. <button class="btn sm sec" data-act="presusave" style="margin-left:auto">Guardar presupuestos</button></div></div>
+    body: `<div class="card"><div class="ch"><h2>Presupuesto de ${mesLargo(mes)}</h2></div><table class="tbl"><thead><tr><th>Proyecto</th><th>Cliente</th><th class="num">Links del mes</th><th class="num">Ya planificados</th><th class="num">Tope del mes (ARS)</th><th class="num">Gastado</th><th class="num">Disponible</th><th class="num">USD máx. por link</th></tr></thead><tbody>
+      ${lin.map((p) => { const c = (p.params.costos || {})[mes], tope = c ? c.tope : p.params.presupuestoMensualARS ? Math.round(p.params.presupuestoMensualARS * (p.params.costoObjetivo ?? 30) / 100) : null, gast = c ? c.gastado : null;
+        return `<tr><td class="mono">${h(p.code)}</td><td>${h(p.cliente)}</td><td class="num">${unidades(p.code) || p.params.linksMes || 0}${unidades(p.code) ? '' : ' <span class="mute small">(AS)</span>'}</td><td class="num">${S.data.lb.filter((t) => t.project === p.code && t.estado !== 'Anulado' && (t.deadline || '').startsWith(mes)).length}</td>
+          <td class="num">${tope !== null ? '$ ' + fmtN(tope, 0) : '<span class="mute">—</span>'}</td><td class="num">${gast !== null ? '$ ' + fmtN(gast, 0) : '<span class="mute">—</span>'}</td><td class="num"><b>${tope !== null ? '$ ' + fmtN(Math.max(0, tope - (gast || 0)), 0) : '—'}</b></td><td class="num mute">${p.params.precioMaxUSD ?? '—'}</td></tr>`; }).join('')}</tbody></table>
+      <div class="cb small mute">Tope = presupuesto mensual × % costo objetivo, y gastado = lo que muestra AppSheet en "Costos Mensuales" (Gestión Link Building)${lin[0]?.params.costosAt ? `, copiado el ${fmtD(lin[0].params.costosAt)}` : ''}. Links: plan del mes en Horas o, si no hay, la cantidad mensual de AppSheet.</div></div>
     ${estado === 'pedida' ? `<div class="alert" style="margin:16px 0"><b>Pedido de validación guardado.</b> Abrí Claude con <b>Opus · esfuerzo alto</b> y escribí: <code>Validá la planificación de ${h(mes)} de Proyectos Eleven</code>. Claude la revisa contra AppSheet y el compilado y deja acá sus notas.</div>` : ''}
     ${pl?.validacion ? `<div class="card" style="margin:16px 0"><div class="ch"><h2>Notas de Claude</h2></div><div class="cb" style="white-space:pre-wrap">${h(pl.validacion)}</div></div>` : ''}
     <div style="margin-top:20px">${res || (pl?.cargando ? '<div class="empty">Cargando…</div>' : '<div class="card"><div class="empty">Cargá los presupuestos y tocá <b>Armar planificación</b>. No se arma sola.</div></div>')}</div>`,
@@ -499,39 +501,58 @@ VIEWS_FN.ia = () => {
       <button class="btn sm">Guardar prompts de ${h(cur)}</button></form></div></div>`,
   };
 };
-const GAS_CODE = `// Proyectos Eleven → escribe el texto (y la imagen) en el Google Doc de una tarea. Corre con tu cuenta de Eleven.
+const GAS_CODE = `// Proyectos Eleven → pega la redacción (y la imagen) en el documento de una tarea de AppSheet. Corre con tu cuenta de Eleven.
 const SECRET = '__SECRET__';
+const ANCHO_IMAGEN = 567; // igual que las redacciones publicadas (3:2)
 function doPost(e) {
   try {
     const b = JSON.parse(e.postData.contents);
     if (b.secret !== SECRET) return out({ error: 'No autorizado' });
-    const id = docId(b.doc, b.codigo);
-    if (!id) return out({ error: 'No encontré el documento de la tarea ' + (b.codigo || '') });
-    const doc = DocumentApp.openById(id), body = doc.getBody();
-    body.clear();
-    if (b.titulo) body.appendParagraph(b.titulo).setHeading(DocumentApp.ParagraphHeading.HEADING1);
-    if (b.imagen) body.appendImage(Utilities.newBlob(Utilities.base64Decode(b.imagen.data), b.imagen.mime, 'imagen'));
-    String(b.cuerpo || '').split(/\\n{2,}/).forEach(function (bloque) {
-      const t = bloque.trim(); if (!t) return;
-      const m = t.match(/^(#{2,3})\\s+(.*)$/);
-      const p = m ? body.appendParagraph(m[2]).setHeading(m[1].length === 2 ? DocumentApp.ParagraphHeading.HEADING2 : DocumentApp.ParagraphHeading.HEADING3) : body.appendParagraph(t.replace(/\\*\\*/g, ''));
-      links(p);
-    });
-    doc.saveAndClose();
-    return out({ ok: true, doc: 'https://docs.google.com/document/d/' + id + '/edit' });
+    const ids = candidatos(b.doc, b.codigo, b.tipo);
+    if (!ids.length) return out({ error: 'No encontré el documento de la tarea ' + (b.codigo || '') });
+    for (const id of ids) {
+      const doc = DocumentApp.openById(id), body = doc.getBody();
+      try { body.appendParagraph(''); } catch (err) { continue; } // sin permiso de edición: probar el siguiente
+      body.clear(); // la plantilla de AppSheet pide borrar su contenido al ingresar la redacción
+      let primero = true, tieneImagen = false;
+      if (b.titulo) titulo(body.appendParagraph(b.titulo).setHeading(DocumentApp.ParagraphHeading.HEADING1));
+      String(b.cuerpo || '').split(/\\n{2,}/).forEach(function (bloque) {
+        const t = bloque.trim(); if (!t) return;
+        const m = t.match(/^(#{1,3})\\s+(.*)$/);
+        if (m) { titulo(body.appendParagraph(m[2].replace(/\\*\\*/g, '')).setHeading(m[1].length <= 2 ? DocumentApp.ParagraphHeading.HEADING2 : DocumentApp.ParagraphHeading.HEADING3)); return; }
+        t.split(/\\n/).forEach(function (linea) {
+          const li = linea.match(/^\\s*[-*]\\s+(.*)$/), p = li ? body.appendListItem(li[1]) : body.appendParagraph(linea);
+          formato(p);
+        });
+        if (primero && b.imagen && !tieneImagen) { // la imagen va después del primer párrafo, como en las notas publicadas
+          const img = body.appendParagraph('').appendInlineImage(Utilities.newBlob(Utilities.base64Decode(b.imagen.data), b.imagen.mime, 'imagen'));
+          const r = img.getHeight() / img.getWidth(); img.setWidth(ANCHO_IMAGEN).setHeight(Math.round(ANCHO_IMAGEN * r));
+          tieneImagen = true;
+        }
+        primero = false;
+      });
+      const p0 = body.getParagraphs()[0]; if (p0 && !p0.getText() && body.getNumChildren() > 1) p0.removeFromParent();
+      doc.saveAndClose();
+      return out({ ok: true, doc: 'https://docs.google.com/document/d/' + id + '/edit' });
+    }
+    return out({ error: 'Tu usuario no puede editar el documento ahora (AppSheet lo habilita solo en algunos estados)' });
   } catch (err) { return out({ error: String(err) }); }
 }
-function links(p) {
+function titulo(p) { p.editAsText().setBold(true); }
+function formato(p) {
   const t = p.editAsText(); let s = t.getText(), m;
-  while ((m = /\\[([^\\]]+)\\]\\((https?:[^)]+)\\)/.exec(s))) {
-    t.deleteText(m.index, m.index + m[0].length - 1); t.insertText(m.index, m[1]); t.setLinkUrl(m.index, m.index + m[1].length - 1, m[2]); s = t.getText();
+  while ((m = /\\[([^\\]]+)\\]\\((https?:[^)]+)\\)/.exec(s))) { // [texto](url) → enlace en negrita, como el anchor de las notas
+    t.deleteText(m.index, m.index + m[0].length - 1); t.insertText(m.index, m[1].replace(/\\*\\*/g, ''));
+    t.setLinkUrl(m.index, m.index + m[1].replace(/\\*\\*/g, '').length - 1, m[2]); t.setBold(m.index, m.index + m[1].replace(/\\*\\*/g, '').length - 1, true); s = t.getText();
   }
+  while ((m = /\\*\\*([^*]+)\\*\\*/.exec(s))) { t.deleteText(m.index, m.index + m[0].length - 1); t.insertText(m.index, m[1]); t.setBold(m.index, m.index + m[1].length - 1, true); s = t.getText(); }
 }
-function docId(url, codigo) {
-  const m = String(url || '').match(/\\/d\\/([\\w-]{20,})/); if (m) return m[1];
-  if (!codigo) return '';
-  const it = DriveApp.searchFiles("title contains '" + codigo.replace(/'/g, '') + "' and mimeType = 'application/vnd.google-apps.document' and trashed = false");
-  return it.hasNext() ? it.next().getId() : '';
+function candidatos(url, codigo, tipo) {
+  const m = String(url || '').match(/\\/d\\/([\\w-]{20,})/); if (m) return [m[1]];
+  if (!codigo) return [];
+  const out = [], it = DriveApp.searchFiles("title contains '" + codigo.replace(/'/g, '') + "_' and mimeType = 'application/vnd.google-apps.document' and trashed = false");
+  while (it.hasNext()) { const f = it.next(), n = f.getName().replace(/\\s/g, '').toUpperCase(); if (n.indexOf(codigo.toUpperCase() + '_') === 0 && n.indexOf(String(tipo || '').replace(/\\s/g, '').toUpperCase()) >= 0) out.push(f.getId()); }
+  return out.sort();
 }
 function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }`;
 
@@ -575,7 +596,7 @@ async function abrirRedaccion(kind, id) {
   openDrawer(`<form id="txf" data-kind="${kind}" data-id="${h(id)}" data-min="${h(min ?? '')}"><div class="dh"><h2>Redacción — ${h(titulo)}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
     <div class="db"><div class="fields">
       ${kind === 'lb' ? `<div class="full small mute">Anchor: <b>${h(x.anchor)}</b> → ${h(x.url_cliente || 'sin URL del cliente')} · Medio: ${h(normDomain(x.medio))}</div>` : `<div class="full small mute">${h([x.subproyecto, x.variante].filter(Boolean).join(' · ') || 'Sin subproyecto')}</div>`}
-      <div class="full iabar">${st.gemini ? `<button type="button" class="btn sm" data-act="iaredactar">${ic('ia')}Redactar con IA</button><button type="button" class="btn sm sec" data-act="iaimagen">${ic('img')}Generar imagen</button>` : `<span class="small mute">Conectá Gemini en <a href="#" data-act="view" data-v="ia">IA y prompts</a> para redactar con un clic.</span>`}
+      <div class="full iabar">${st.gemini ? (kind === 'lb' ? `<button type="button" class="btn sm" data-act="iatodo">${ic('ia')}Redactar e ilustrar${st.gas && DOC_EDITABLE_LB.includes(x.estado) ? ' y pegar en el doc' : ''}</button>` : `<button type="button" class="btn sm" data-act="iaredactar">${ic('ia')}Redactar con IA</button><button type="button" class="btn sm sec" data-act="iaimagen">${ic('img')}Generar imagen</button>`) : `<span class="small mute">Conectá Gemini en <a href="#" data-act="view" data-v="ia">IA y prompts</a> para redactar con un clic.</span>`}
         ${st.gemini && !tienePrompt ? '<span class="small mute">Sin prompt propio para este proyecto: se usa uno básico.</span>' : ''}<span id="iastat" class="small mute"></span></div>
       <details class="full" ${kind === 'red' && !x.subproyecto && !/^https?:|^\//.test(x.tema) && /^LAV-RED/.test(x.project) ? 'open' : ''}><summary class="small">Material de base para la IA (receta copiada, transcripción de un video, notas…)</summary><textarea id="material" style="min-height:120px;margin-top:6px" placeholder="Pegá acá la receta o el texto fuente. La IA arma el contenido completo a partir de esto."></textarea></details>
       <label class="full">Título<input name="titulo" value="${h(t.titulo)}"></label>
@@ -584,7 +605,7 @@ async function abrirRedaccion(kind, id) {
       <div class="full" style="display:flex;gap:12px;align-items:center"><span id="txcount" class="small"></span><label class="check" style="margin-left:auto"><input type="checkbox" name="lista" ${t.lista ? 'checked' : ''}> Lista para pasar a AppSheet</label></div>
       <label class="full">Documento de la tarea (Google Doc)<input name="url" type="url" value="${h(t.url || x.doc_url || '')}" placeholder="https://docs.google.com/document/d/…"></label>
     </div><div class="err" id="ferr"></div></div>
-    <div class="df"><button type="button" class="btn sec left" data-act="copytxt">${ic('copy')}Copiar texto</button>${st.gas ? `<button type="button" class="btn sec" data-act="docenviar">${ic('doc')}Enviar al doc</button>` : ''}<button type="button" class="btn sec" data-act="close">Cerrar</button><button class="btn">Guardar</button></div></form>`, true);
+    <div class="df"><button type="button" class="btn sec left" data-act="copytxt">${ic('copy')}Copiar texto</button>${st.gas ? `<button type="button" class="btn sec" data-act="docenviar" ${kind === 'lb' && !DOC_EDITABLE_LB.includes(x.estado) ? `disabled title="AppSheet deja editar el documento solo en ${DOC_EDITABLE_LB.join(' o ')}"` : ''}>${ic('doc')}Enviar al doc</button>` : ''}<button type="button" class="btn sec" data-act="close">Cerrar</button><button class="btn">Guardar</button></div></form>`, true);
   contarVivo(); mostrarImagen(kind, id);
 }
 async function mostrarImagen(kind, id) {
@@ -603,6 +624,22 @@ async function iaRedactarUI(el) {
     const r = await api('/api/ia/redactar', 'POST', { kind: f.dataset.kind, ref: f.dataset.id, material: $('#material')?.value || '' });
     f.titulo.value = r.titulo; f.cuerpo.value = r.cuerpo; contarVivo(); $('#iastat').textContent = `Listo en ${r.segundos} s con ${r.modelo}. Revisalo antes de marcarlo como listo.`;
   } catch (e) { $('#iastat').textContent = e.message; }
+  el.disabled = false;
+}
+/** Links: texto + imagen con un clic y, si la tarea está en un estado editable, se pega directo en el documento de AppSheet. */
+async function iaTodoUI(el) {
+  const f = $('#txf'), x = S.data.lb.find((o) => o.id === f.dataset.id); if (f.cuerpo.value.trim() && !confirm('Ya hay texto. ¿Reemplazarlo por uno nuevo de la IA?')) return;
+  const st = (t) => { $('#iastat').textContent = t; }; el.disabled = true;
+  try {
+    st('1/3 Redactando…'); const r = await api('/api/ia/redactar', 'POST', { kind: 'lb', ref: f.dataset.id }); f.titulo.value = r.titulo; f.cuerpo.value = r.cuerpo; contarVivo();
+    st('2/3 Generando la imagen…'); let img = true; try { await api('/api/ia/imagen', 'POST', { kind: 'lb', ref: f.dataset.id, titulo: r.titulo }); await mostrarImagen('lb', f.dataset.id); } catch (e) { img = false; toast('Imagen: ' + e.message); }
+    if (S.data.settings.gas && DOC_EDITABLE_LB.includes(x.estado)) {
+      st('3/3 Pegando en el documento de AppSheet…');
+      await api('/api/texto', 'POST', { kind: 'lb', ref: f.dataset.id, titulo: f.titulo.value, cuerpo: f.cuerpo.value, url: f.url.value, lista: f.lista.checked });
+      const d = await api('/api/doc/enviar', 'POST', { kind: 'lb', ref: f.dataset.id, doc_url: f.url.value, conImagen: img }); if (d.doc) f.url.value = d.doc;
+      st(`Listo: ${r.palabras} palabras${img ? ' + imagen' : ''}, pegado en el documento.`);
+    } else st(`Listo: ${r.palabras} palabras${img ? ' + imagen' : ''}. ${S.data.settings.gas ? `No se pegó: el documento solo se edita en ${DOC_EDITABLE_LB.join(' o ')}.` : 'Conectá el script de Google para pegarlo solo.'}`);
+  } catch (e) { st(e.message); }
   el.disabled = false;
 }
 async function iaImagenUI(el) {
@@ -658,16 +695,12 @@ document.addEventListener('click', async (ev) => {
     case 'notadel': if (confirm('¿Borrar la nota?')) { await api('/api/notas/' + el.dataset.id, 'DELETE'); await load(); } break;
     case 'planarmar': try { await armarPlan(); } catch (e) { toast(e.message); } break;
     case 'planvalidar': { const r = await api('/api/planes?month=' + S.f.planMes); await api('/api/planes', 'POST', { month: S.f.planMes, estado: 'pedida', data: r.data }); S.plan = null; render(); break; }
-    case 'presusave': {
-      const ps = S.data.projects.map((p) => { const i = document.querySelector(`.presu[data-code="${p.code}"]`); return { ...p, params: { ...p.params, ...(i ? { presupuestoUSD: i.value } : {}) } }; });
-      try { await api('/api/projects', 'POST', { projects: ps }); toast('Presupuestos guardados'); await load(); } catch (e) { toast(e.message); }
-      break;
-    }
     case 'iamodelos': await api('/api/settings', 'POST', { gemini_model_texto: $('#mtexto').value, gemini_model_imagen: $('#mimagen').value }); S.iaEstado = null; toast('Modelos guardados'); await load(); break;
     case 'iaprueba': { $('#iamsg').textContent = 'Probando…'; try { const r = await api('/api/ia/prueba', 'POST'); $('#iamsg').textContent = `${r.modelo}: "${r.respuesta}" (${(r.ms / 1000).toFixed(1)} s)`; } catch (e) { $('#iamsg').textContent = e.message; } break; }
     case 'gascode': { const { secret } = await api('/api/gas/secret'); if (!secret) { toast('Primero guardá la URL (o cualquier texto) para generar la clave del script'); break; } navigator.clipboard?.writeText(GAS_CODE.replace('__SECRET__', secret)).then(() => toast('Código copiado: pegalo en script.google.com')); break; }
     case 'iaredactar': await iaRedactarUI(el); break;
     case 'iaimagen': await iaImagenUI(el); break;
+    case 'iatodo': await iaTodoUI(el); break;
     case 'docenviar': await docEnviarUI(el); break;
     case 'copy': navigator.clipboard?.writeText(el.dataset.v).then(() => toast('Mail copiado')); break;
     case 'copycal': navigator.clipboard?.writeText(S.calurl || '').then(() => toast('Link copiado')); break;
@@ -725,7 +758,7 @@ document.addEventListener('submit', async (ev) => {
     return guardar(() => api('/api/plan', 'POST', { month: S.f.mes, rows }), 'Plan guardado');
   }
   if (f.id === 'projf') {
-    const projects = [...f.querySelectorAll('tr[data-code]')].map((tr) => { const g = (n) => tr.querySelector(`[name=${n}]`)?.value ?? ''; return { code: tr.dataset.code, cliente: g('cliente'), active: tr.querySelector('[name=active]').checked, params: { drMin: g('drMin'), trafMin: g('trafMin'), precioMaxUSD: g('precioMaxUSD'), repDias: g('repDias'), palabrasMin: g('palabrasMin'), presupuestoUSD: g('presupuestoUSD'), dominio: g('dominio'), paises: g('paises'), servicio: g('servicio') } }; });
+    const projects = [...f.querySelectorAll('tr[data-code]')].map((tr) => { const g = (n) => tr.querySelector(`[name=${n}]`)?.value ?? ''; return { code: tr.dataset.code, cliente: g('cliente'), active: tr.querySelector('[name=active]').checked, params: { drMin: g('drMin'), trafMin: g('trafMin'), precioMaxUSD: g('precioMaxUSD'), repDias: g('repDias'), palabrasMin: g('palabrasMin'), linksMes: g('linksMes'), dominio: g('dominio'), paises: g('paises'), servicio: g('servicio') } }; });
     try { await api('/api/projects', 'POST', { projects }); toast('Proyectos guardados'); await load(); } catch (e) { toast(e.message); }
   }
 });

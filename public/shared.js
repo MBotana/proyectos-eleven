@@ -112,6 +112,8 @@ export const PASOS_RED = {
   'Para CMS - REQUIERE ESQUEMA PRECIOS': { botones: ['Edit'], falta: ['Esquema de precios + carga en CMS'], sigue: 'Cerrado', confirmado: false },
 };
 /** Desde qué estado se puede cargar la redacción de un link (en AppSheet aparece "Crear redacción" en Gestión de Backlink). */
+/** Estados de link building en los que AppSheet deja editar el documento de redacción. */
+export const DOC_EDITABLE_LB = ['Gestión de Backlink', 'FLAG NO_EDITION_DOC'];
 export const puedeRedactarLB = (estado) => estado !== 'No Iniciado' && estado !== 'Anulado';
 
 /** Fecha AAAA-MM-DD en una zona horaria. */
@@ -191,43 +193,53 @@ export function aptoMedio(m, p, lb = [], hoy = hoyEn()) {
 }
 
 // ======================= Planificación del mes =======================
+/** Tipo de cambio ARS por USD que usa el compilado (mediana de los deals en pesos). */
+export function tipoCambio(medios) {
+  const r = medios.filter((m) => m.moneda === 'ARS' && m.precio && m.precio_usd).map((m) => m.precio / m.precio_usd).sort((a, b) => a - b);
+  return r.length ? r[Math.floor(r.length / 2)] : null;
+}
+/** Costo de un medio en pesos (precio en ARS si el deal es en pesos; si no, USD × tipo de cambio). */
+export const costoARS = (m, tc) => (m.precio_usd === null || m.precio_usd === undefined ? null : m.moneda === 'ARS' && m.precio ? m.precio : tc ? Math.round(m.precio_usd * tc) : null);
 /**
- * Arma la planificación: para cada proyecto de links, cuántos links faltan en el mes (plan de unidades menos tareas ya planificadas)
- * y qué medios usar dentro del presupuesto. Prioriza medios que sirven para varios proyectos (un mismo contacto, varias notas)
- * y, entre esos, el más barato con mejor DR. Medios sin precio quedan como alternativas para negociar.
+ * Arma la planificación del mes. Por proyecto: links a cubrir (plan de unidades del mes o, si no hay, la cantidad mensual de AppSheet,
+ * menos las tareas ya planificadas en ese mes) y plata disponible = tope de "Costos Mensuales" de AppSheet (presupuesto × % costo objetivo)
+ * menos lo ya gastado ese mes. Prioriza medios que sirven para varios proyectos (un mismo contacto, varias notas) y, entre esos,
+ * el más barato con mejor DR. Medios sin precio quedan como alternativas para negociar. Montos en ARS.
  */
 export function planificar({ projects, medios, lb, plan, month, hoy = hoyEn() }) {
+  const tc = tipoCambio(medios);
   const lin = projects.filter((p) => p.active && p.tipo === 'LIN');
   const aptos = new Map(lin.map((p) => [p.code, medios.filter((m) => aptoMedio(m, p, lb, hoy).ok)]));
   const usoCount = new Map();
   for (const [, arr] of aptos) for (const m of arr) usoCount.set(m.dominio, (usoCount.get(m.dominio) || 0) + 1);
   const proyectos = lin.map((p) => {
-    const unidades = plan.filter((r) => r.month === month && r.project === p.code && /^A /.test(r.task_type)).reduce((a, r) => a + (r.units || 0), 0);
+    const pp = p.params || {}, c = (pp.costos || {})[month];
+    const delPlan = plan.filter((r) => r.month === month && r.project === p.code && /^A /.test(r.task_type)).reduce((a, r) => a + (r.units || 0), 0);
+    const unidades = delPlan || num(pp.linksMes) || 0;
     const ya = lb.filter((t) => t.project === p.code && t.estado !== 'Anulado' && (t.deadline || '').startsWith(month));
-    const gastado = ya.reduce((a, t) => a + ((t.moneda || 'USD') === 'USD' && t.precio ? Number(t.precio) : 0), 0);
-    const presupuesto = num(p.params?.presupuestoUSD);
-    return { code: p.code, cliente: p.cliente, unidades, yaPlanificadas: ya.length, falta: Math.max(0, unidades - ya.length), presupuesto, gastado, disponible: presupuesto === null ? null : Math.max(0, presupuesto - gastado), items: [], alternativas: [], aptos: aptos.get(p.code).length };
+    const tope = c ? num(c.tope) : num(pp.presupuestoMensualARS) !== null ? Math.round(pp.presupuestoMensualARS * (num(pp.costoObjetivo) ?? 30) / 100) : null;
+    const gastado = c ? num(c.gastado) || 0 : 0;
+    return { code: p.code, cliente: p.cliente, unidades, yaPlanificadas: ya.length, falta: Math.max(0, unidades - ya.length), presupuesto: tope, gastado, disponible: tope === null ? null : Math.max(0, tope - gastado), items: [], alternativas: [], aptos: aptos.get(p.code).length };
   });
-  const usados = new Map(); // dominio → proyectos donde ya se asignó
-  const orden = [...proyectos].sort((a, b) => a.aptos - b.aptos);
-  for (const pr of orden) {
-    const cand = aptos.get(pr.code).filter((m) => m.precio_usd !== null)
-      .sort((a, b) => (usoCount.get(b.dominio) - usoCount.get(a.dominio)) || ((usados.has(b.dominio) ? 1 : 0) - (usados.has(a.dominio) ? 1 : 0)) || (a.precio_usd - b.precio_usd) || ((b.dr || 0) - (a.dr || 0)));
+  const usados = new Map();
+  for (const pr of [...proyectos].sort((a, b) => a.aptos - b.aptos)) {
+    const cand = aptos.get(pr.code).map((m) => ({ m, ars: costoARS(m, tc) })).filter((x) => x.ars !== null)
+      .sort((a, b) => (usoCount.get(b.m.dominio) - usoCount.get(a.m.dominio)) || ((usados.has(b.m.dominio) ? 1 : 0) - (usados.has(a.m.dominio) ? 1 : 0)) || (a.ars - b.ars) || ((b.m.dr || 0) - (a.m.dr || 0)));
+    const piso = cand.length ? Math.min(...cand.map((x) => x.ars)) : 0;
     let resto = pr.disponible;
-    for (const m of cand) {
+    for (const { m, ars } of cand) {
       if (pr.items.length >= pr.falta) break;
-      const quedan = pr.falta - pr.items.length;
-      if (resto !== null) { const piso = Math.min(...cand.map((c) => c.precio_usd)); if (m.precio_usd + piso * (quedan - 1) > resto + 1e-9) continue; }
-      pr.items.push({ dominio: m.dominio, mail: m.mail, dr: m.dr, trafico: m.trafico, pais: m.pais, precio_usd: m.precio_usd, proveedor: m.proveedor, compartible: usoCount.get(m.dominio) });
-      if (resto !== null) resto -= m.precio_usd;
+      if (resto !== null && ars + piso * (pr.falta - pr.items.length - 1) > resto) continue;
+      pr.items.push({ dominio: m.dominio, mail: m.mail, dr: m.dr, trafico: m.trafico, pais: m.pais, precio_usd: m.precio_usd, ars, moneda: m.moneda, proveedor: m.proveedor, compartible: usoCount.get(m.dominio) });
+      if (resto !== null) resto -= ars;
       usados.set(m.dominio, [...(usados.get(m.dominio) || []), pr.code]);
     }
     pr.alternativas = aptos.get(pr.code).filter((m) => m.precio_usd === null).sort((a, b) => (usoCount.get(b.dominio) - usoCount.get(a.dominio)) || ((b.dr || 0) - (a.dr || 0)))
       .slice(0, Math.max(5, pr.falta * 2)).map((m) => ({ dominio: m.dominio, mail: m.mail, dr: m.dr, trafico: m.trafico, compartible: usoCount.get(m.dominio) }));
-    pr.total = pr.items.reduce((a, x) => a + x.precio_usd, 0);
+    pr.total = pr.items.reduce((a, x) => a + x.ars, 0);
   }
   for (const pr of proyectos) for (const it of pr.items) it.tambien = (usados.get(it.dominio) || []).filter((c) => c !== pr.code);
-  return { month, creado: Date.now(), proyectos };
+  return { month, creado: Date.now(), tipoCambio: tc, proyectos };
 }
 
 // ======================= Alertas, notas y sugerencias =======================

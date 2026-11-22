@@ -9,7 +9,7 @@ export const PROMPTS_INICIALES: [string, string, string][] = [
  [
   "GAL-LIN-1",
   "imagen",
-  "Fotografía de stock realista, horizontal 16:9, estilo editorial de diario argentino, que ilustre el artículo \"{titulo}\". Escena cotidiana en Argentina relacionada con el tema (autos en una calle de barrio, una familia en su casa, una persona revisando papeles con calma). Personas reales de 30 a 55 años, expresión tranquila, luz natural cálida, profundidad de campo baja. Sin texto, sin logos, sin patentes legibles, sin marcas."
+  "Fotografía de stock realista, horizontal 3:2, estilo editorial de diario argentino, que ilustre el artículo \"{titulo}\". Escena cotidiana en Argentina relacionada con el tema (autos en una calle de barrio, una familia en su casa, una persona revisando papeles con calma). Personas reales de 30 a 55 años, expresión tranquila, luz natural cálida, profundidad de campo baja. Sin texto, sin logos, sin patentes legibles, sin marcas."
  ],
  [
   "LAV-LIN-4",
@@ -19,7 +19,7 @@ export const PROMPTS_INICIALES: [string, string, string][] = [
  [
   "LAV-LIN-4",
   "imagen",
-  "Fotografía gastronómica profesional, horizontal 16:9, del plato \"{anchor}\" ya terminado y servido, tal como se come en Argentina. Vista a 45 grados, plato o fuente sobre mesa de madera clara, mantel de lino neutro, fondo claro desenfocado, luz natural lateral suave, algunos ingredientes o hierbas frescas alrededor y un cuenquito con especias. Colores naturales, apetitoso, sin texto, sin packaging, sin logos."
+  "Fotografía gastronómica profesional, horizontal 3:2, del plato \"{anchor}\" ya terminado y servido, tal como se come en Argentina. Vista a 45 grados, plato o fuente sobre mesa de madera clara, mantel de lino neutro, fondo claro desenfocado, luz natural lateral suave, algunos ingredientes o hierbas frescas alrededor y un cuenquito con especias. Colores naturales, apetitoso, sin texto, sin packaging, sin logos."
  ],
  [
   "NAV-LIN-5",
@@ -29,7 +29,7 @@ export const PROMPTS_INICIALES: [string, string, string][] = [
  [
   "NAV-LIN-5",
   "imagen",
-  "Fotografía de stock realista, horizontal 16:9, estilo editorial, que ilustre \"{titulo}\". Comerciante argentina o argentino de 25 a 45 años en su local (almacén, dietética, café, tienda de barrio), sonriendo, usando un celular o una terminal de cobro genérica. Local cálido y ordenado, luz natural, fondo con estanterías desenfocadas. Sin texto, sin logos, sin pantallas legibles, sin marcas en los productos."
+  "Fotografía de stock realista, horizontal 3:2, estilo editorial, que ilustre \"{titulo}\". Comerciante argentina o argentino de 25 a 45 años en su local (almacén, dietética, café, tienda de barrio), sonriendo, usando un celular o una terminal de cobro genérica. Local cálido y ordenado, luz natural, fondo con estanterías desenfocadas. Sin texto, sin logos, sin pantallas legibles, sin marcas en los productos."
  ],
  [
   "OMI-LIN-1",
@@ -39,7 +39,7 @@ export const PROMPTS_INICIALES: [string, string, string][] = [
  [
   "OMI-LIN-1",
   "imagen",
-  "Fotografía de stock realista, horizontal 16:9, que ilustre \"{titulo}\". Escena de salud y bienestar en Argentina: consulta médica tranquila, persona adulta haciendo actividad saludable o familia en casa. Ambiente luminoso y limpio, tonos claros con acentos azules, luz natural, expresiones serenas. Nada de sangre, agujas ni imágenes impresionantes. Sin texto, sin logos."
+  "Fotografía de stock realista, horizontal 3:2, que ilustre \"{titulo}\". Escena de salud y bienestar en Argentina: consulta médica tranquila, persona adulta haciendo actividad saludable o familia en casa. Ambiente luminoso y limpio, tonos claros con acentos azules, luz natural, expresiones serenas. Nada de sangre, agujas ni imágenes impresionantes. Sin texto, sin logos."
  ],
  [
   "TEL-LIN-2",
@@ -49,7 +49,7 @@ export const PROMPTS_INICIALES: [string, string, string][] = [
  [
   "TEL-LIN-2",
   "imagen",
-  "Fotografía lifestyle realista, horizontal 16:9, que ilustre \"{titulo}\". Persona joven o adulta en Argentina usando un smartphone genérico en una situación cotidiana (en un café, en el transporte, en casa). El celular sin marca visible y con la pantalla sin contenido legible. Luz natural, colores vivos pero naturales, profundidad de campo baja. Sin texto, sin logos."
+  "Fotografía lifestyle realista, horizontal 3:2, que ilustre \"{titulo}\". Persona joven o adulta en Argentina usando un smartphone genérico en una situación cotidiana (en un café, en el transporte, en casa). El celular sin marca visible y con la pantalla sin contenido legible. Luz natural, colores vivos pero naturales, profundidad de campo baja. Sin texto, sin logos."
  ],
  [
   "XUB-LIN-1",
@@ -59,7 +59,7 @@ export const PROMPTS_INICIALES: [string, string, string][] = [
  [
   "XUB-LIN-1",
   "imagen",
-  "Fotografía de stock realista, horizontal 16:9, que ilustre \"{titulo}\". Dueña o dueño de una pyme o contadora en una oficina pequeña y luminosa en Argentina, revisando documentos y una notebook con planilla genérica. Escritorio ordenado, plantas, luz natural de ventana. Pantallas sin texto legible. Sin logos, sin texto."
+  "Fotografía de stock realista, horizontal 3:2, que ilustre \"{titulo}\". Dueña o dueño de una pyme o contadora en una oficina pequeña y luminosa en Argentina, revisando documentos y una notebook con planilla genérica. Escritorio ordenado, plantas, luz natural de ventana. Pantallas sin texto legible. Sin logos, sin texto."
  ],
  [
   "XUB-LIN-2",
@@ -69,7 +69,7 @@ export const PROMPTS_INICIALES: [string, string, string][] = [
  [
   "XUB-LIN-2",
   "imagen",
-  "Fotografía de stock realista, horizontal 16:9, que ilustre \"{titulo}\". Emprendedora o emprendedor colombiano en su negocio u oficina pequeña, trabajando en una notebook con documentos. Ambiente cálido, luz natural, plantas, estilo latinoamericano contemporáneo. Pantallas sin texto legible. Sin logos, sin texto."
+  "Fotografía de stock realista, horizontal 3:2, que ilustre \"{titulo}\". Emprendedora o emprendedor colombiano en su negocio u oficina pequeña, trabajando en una notebook con documentos. Ambiente cálido, luz natural, plantas, estilo latinoamericano contemporáneo. Pantallas sin texto legible. Sin logos, sin texto."
  ],
  [
   "LAV-RED-5",
