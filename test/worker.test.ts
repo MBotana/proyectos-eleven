@@ -219,6 +219,15 @@ test('Gemini: elige modelos y pide la clave si falta; notas y prompts', async ()
   await call(env, '/api/prompts', 'POST', { project: 'NAV-LIN-5', clave: 'lb', texto: 'Escribí sobre {anchor}' }, tok);
   await call(env, '/api/notas', 'POST', { texto: 'Preguntar a Lucas por el esquema de precios', lider: true }, tok);
   const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
-  assert.equal(d.prompts[0].texto, 'Escribí sobre {anchor}'); assert.equal(d.notas[0].lider, 1);
+  assert.equal(d.prompts.find((p: any) => p.project === 'NAV-LIN-5' && p.clave === 'lb').texto, 'Escribí sobre {anchor}', 'lo editado no se pisa');
+  assert.ok(d.prompts.length >= 28, 'prompts iniciales cargados'); assert.equal(d.notas[0].lider, 1);
   assert.equal(d.settings.gemini, '');
+});
+
+test('tipo de pieza de Alicante según el tema', async () => {
+  const { tipoPieza } = await import('../src/worker.ts');
+  assert.equal(tipoPieza({ tema: 'https://alicante.com.ar/receta/2650-receta-pionono/' }), 'Optimización de recetas');
+  assert.equal(tipoPieza({ tema: '/recetas-categoria/recetas-faciles/' }), 'Categorías');
+  assert.equal(tipoPieza({ tema: 'Chow fan (arroz frito)' }), 'Recetas CC');
+  assert.equal(tipoPieza({ tema: 'x', subproyecto: 'Portal Omint' }), 'Portal Omint');
 });

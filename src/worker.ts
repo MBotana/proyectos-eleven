@@ -3,6 +3,7 @@
  * El calendario se publica en /cal/<token>.ics para suscribirse desde Google Calendar. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SCHEMA, MIGRATIONS } from './schema.ts';
+import { PROMPTS_INICIALES, PROMPTS_VERSION } from './prompts.ts';
 import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays, tipoHoras, QUIEN } from '../public/shared.js';
 
 export interface Env { DB: any; ASSETS?: any }
@@ -53,6 +54,11 @@ export async function ensureSchema(env: Env) {
     for (const [project, task_type, hours, units] of PLAN_INICIAL.rows)
       await env.DB.prepare('INSERT OR IGNORE INTO plan (month, project, task_type, hours, units) VALUES (?, ?, ?, ?, ?)').bind(PLAN_INICIAL.month, project, task_type, hours, units).run();
     await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('seed_v', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(SEED_VERSION)).run();
+  }
+  const pv = Number((await env.DB.prepare("SELECT value FROM settings WHERE key = 'prompts_v'").first())?.value ?? 0);
+  if (pv < PROMPTS_VERSION) {
+    for (const [project, clave, texto] of PROMPTS_INICIALES) await env.DB.prepare("INSERT INTO prompts (project, clave, texto, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(project, clave) DO UPDATE SET texto = CASE WHEN prompts.texto = '' THEN excluded.texto ELSE prompts.texto END").bind(project, clave, texto, Date.now()).run();
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('prompts_v', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(PROMPTS_VERSION)).run();
   }
   ready.add(env.DB);
 }
@@ -431,6 +437,24 @@ async function promptDe(env: Env, project: string, claves: string[]) {
   for (const c of claves) { const r = await env.DB.prepare('SELECT texto FROM prompts WHERE project = ? AND clave = ?').bind(project, c).first(); if (r && String(r.texto).trim()) return String(r.texto); }
   return '';
 }
+/** Tipo de pieza de una redacción: el subproyecto si está; si no, se deduce del tema (URL de receta → optimización, URL de categoría → categoría, texto → contenido nuevo). */
+export function tipoPieza(t: any) {
+  if (t.subproyecto) return t.subproyecto as string;
+  const tema = String(t.tema || '');
+  if (/^https?:\/\/|^\//.test(tema)) return /categor/i.test(tema) ? 'Categorías' : /\/receta\//i.test(tema) ? 'Optimización de recetas' : 'Optimización';
+  return 'Recetas CC';
+}
+/** Texto principal de una página publicada (para optimizar lo que ya existe). */
+async function textoDePagina(url: string) {
+  try {
+    const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (ProyectosEleven)' }, redirect: 'follow' });
+    if (!r.ok) return '';
+    let html = (await r.text()).slice(0, 600_000);
+    const i = html.search(/<(article|main)[\s>]/i); if (i > 0) html = html.slice(i);
+    return html.replace(/<(script|style|noscript|svg|nav|footer|header)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/(p|li|h\d|div)>/gi, '\n').replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&[a-z]+;/g, ' ').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim().slice(0, 15000);
+  } catch { return ''; }
+}
 const rellenar = (tpl: string, v: Record<string, string>) => tpl.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
 async function varsTarea(env: Env, kind: 'lb' | 'red', ref: string, extra: Record<string, string> = {}) {
   const t: any = await env.DB.prepare(`SELECT * FROM ${kind === 'lb' ? 'lb_tasks' : 'redacciones'} WHERE id = ?`).bind(ref).first();
@@ -442,13 +466,16 @@ async function varsTarea(env: Env, kind: 'lb' | 'red', ref: string, extra: Recor
     medio: (t.medio || '').replace(/^https?:\/\//, ''), dr: String(t.dr ?? ''), palabras_min: String(pp.palabrasMin ?? 500), pais: t.pais || pp.paises || 'Argentina', idioma: t.idioma || 'Español',
     tema: t.tema || '', subproyecto: t.subproyecto || '', variante: t.variante || '', titulo: extra.titulo || tx?.titulo || t.tema || t.anchor || '', texto: (tx?.cuerpo || '').slice(0, 4000), material: extra.material || '',
   };
+  v.tipo_pieza = kind === 'red' ? tipoPieza(t) : '';
+  v.url_actual = /^https?:\/\//.test(t.tema || '') ? t.tema : /^\//.test(t.tema || '') && pp.dominio ? `https://${pp.dominio}${t.tema}` : '';
   v.subproyecto_linea = v.subproyecto ? `\nTipo de pieza: ${v.subproyecto}${v.variante ? ' · ' + v.variante : ''}.` : '';
   v.material_linea = v.material ? `\n\nMaterial de base que te paso (usalo como fuente, no lo copies textual):\n${v.material}` : '';
   return { t, v };
 }
 export async function iaRedactar(env: Env, b: any) {
   const kind = b.kind === 'red' ? 'red' : 'lb', ref = str(b.ref, 60), { t, v } = await varsTarea(env, kind, ref, { material: str(b.material, 20000) });
-  const tpl = (await promptDe(env, t.project, kind === 'red' && t.subproyecto ? [`red:${t.subproyecto}`, 'red'] : [kind])) || PROMPT_BASE[kind];
+  const tpl = (await promptDe(env, t.project, kind === 'red' ? [`red:${v.tipo_pieza}`, 'red'] : [kind])) || PROMPT_BASE[kind];
+  if (tpl.includes('{pagina_actual}')) v.pagina_actual = v.url_actual ? (await textoDePagina(v.url_actual)) || '(no se pudo leer la página)' : '(no hay URL publicada)';
   const model = (await getS(env, 'gemini_model_texto')) || elegirModelos(await gemModelos(env)).texto, t0 = Date.now();
   const { text } = await gemGenerar(env, model, rellenar(tpl, v));
   if (!text.trim()) throw Object.assign(new Error('Gemini no devolvió texto'), { status: 502 });
@@ -461,7 +488,7 @@ export async function iaRedactar(env: Env, b: any) {
 }
 export async function iaImagen(env: Env, b: any) {
   const kind = b.kind === 'red' ? 'red' : 'lb', ref = str(b.ref, 60), { t, v } = await varsTarea(env, kind, ref, { titulo: str(b.titulo, 300) });
-  const tpl = (await promptDe(env, t.project, kind === 'red' && t.subproyecto ? [`imagen:${t.subproyecto}`, 'imagen'] : ['imagen'])) || PROMPT_BASE.imagen;
+  const tpl = (await promptDe(env, t.project, kind === 'red' ? [`imagen:${v.tipo_pieza}`, 'imagen'] : ['imagen'])) || PROMPT_BASE.imagen;
   const model = (await getS(env, 'gemini_model_imagen')) || elegirModelos(await gemModelos(env)).imagen, t0 = Date.now();
   if (!model) throw Object.assign(new Error('Tu cuenta de Gemini no tiene un modelo de imágenes disponible'), { status: 400 });
   const { img } = await gemGenerar(env, model, rellenar(tpl, v), true);

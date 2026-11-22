@@ -470,10 +470,10 @@ VIEWS_FN.alertas = () => {
 };
 
 // ---------- IA y prompts ----------
-const VARS = '{anchor} {url_cliente} {medio} {dr} {palabras_min} {pais} {idioma} {cliente} {dominio_cliente} {codigo} · redacciones: {tema} {subproyecto} {variante} {material} · imagen: {titulo} {texto}';
+const VARS = '{anchor} {url_cliente} {medio} {dr} {palabras_min} {pais} {idioma} {cliente} {dominio_cliente} {codigo} · redacciones: {tema} {tipo_pieza} {subproyecto} {variante} {material} {url_actual} {pagina_actual} · imagen: {titulo} {texto}';
 function clavesPrompt(p) {
   if (p.tipo === 'LIN') return [['lb', 'Texto del artículo (link building)'], ['imagen', 'Imagen destacada']];
-  const subs = [...new Set(S.data.red.filter((r) => r.project === p.code && r.subproyecto).map((r) => r.subproyecto))].sort();
+  const subs = [...new Set([...S.data.red.filter((r) => r.project === p.code && r.subproyecto).map((r) => r.subproyecto), ...(S.data.prompts || []).filter((x) => x.project === p.code && /^red:/.test(x.clave)).map((x) => x.clave.slice(4))])].sort();
   return [['red', 'Texto (general)'], ...subs.map((x) => [`red:${x}`, `Texto · ${x}`]), ['imagen', 'Imagen (general)'], ...subs.map((x) => [`imagen:${x}`, `Imagen · ${x}`])];
 }
 VIEWS_FN.ia = () => {
@@ -577,7 +577,7 @@ async function abrirRedaccion(kind, id) {
       ${kind === 'lb' ? `<div class="full small mute">Anchor: <b>${h(x.anchor)}</b> → ${h(x.url_cliente || 'sin URL del cliente')} · Medio: ${h(normDomain(x.medio))}</div>` : `<div class="full small mute">${h([x.subproyecto, x.variante].filter(Boolean).join(' · ') || 'Sin subproyecto')}</div>`}
       <div class="full iabar">${st.gemini ? `<button type="button" class="btn sm" data-act="iaredactar">${ic('ia')}Redactar con IA</button><button type="button" class="btn sm sec" data-act="iaimagen">${ic('img')}Generar imagen</button>` : `<span class="small mute">Conectá Gemini en <a href="#" data-act="view" data-v="ia">IA y prompts</a> para redactar con un clic.</span>`}
         ${st.gemini && !tienePrompt ? '<span class="small mute">Sin prompt propio para este proyecto: se usa uno básico.</span>' : ''}<span id="iastat" class="small mute"></span></div>
-      <details class="full" ${kind === 'red' && /receta/i.test(x.subproyecto + x.tema) ? 'open' : ''}><summary class="small">Material de base para la IA (receta copiada, transcripción de un video, notas…)</summary><textarea id="material" style="min-height:120px;margin-top:6px" placeholder="Pegá acá la receta o el texto fuente. La IA arma el contenido completo a partir de esto."></textarea></details>
+      <details class="full" ${kind === 'red' && !x.subproyecto && !/^https?:|^\//.test(x.tema) && /^LAV-RED/.test(x.project) ? 'open' : ''}><summary class="small">Material de base para la IA (receta copiada, transcripción de un video, notas…)</summary><textarea id="material" style="min-height:120px;margin-top:6px" placeholder="Pegá acá la receta o el texto fuente. La IA arma el contenido completo a partir de esto."></textarea></details>
       <label class="full">Título<input name="titulo" value="${h(t.titulo)}"></label>
       <label class="full">Texto<textarea name="cuerpo" style="min-height:46vh;font-size:14px;line-height:1.6">${h(t.cuerpo)}</textarea></label>
       <div class="full" id="imgbox"></div>
