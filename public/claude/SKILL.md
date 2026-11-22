@@ -26,14 +26,17 @@ Según lo que pida el usuario, hacé el paso 1, el 2 o los dos (en ese orden).
 2. En la pestaña de AppSheet, con la app abierta, ejecutá (reemplazando CLAVE y ORIGEN):
 
    ```js
-   const s = await fetch(ORIGEN + '/traer.js').then((r) => r.text());
+   const url = ORIGEN + '/traer.js?v=' + Date.now();
+   const el = document.createElement('script');
+   el.src = window.trustedTypes ? trustedTypes.createPolicy('pe' + Date.now(), { createScriptURL: (u) => u }).createScriptURL(url) : url;
+   await new Promise((ok, ko) => { el.onload = ok; el.onerror = () => ko(new Error('no cargó traer.js')); document.head.appendChild(el); });
    window.__peEstado = 'iniciando';
-   new Function(s + '\nreturn traerDeAppSheet;')()(CLAVE, ORIGEN);
+   traerDeAppSheet(CLAVE, ORIGEN);
    'iniciado'
    ```
 
    No esperes el resultado: tarda entre 1 y 3 minutos. Consultá `window.__peEstado` cada 15 segundos hasta que empiece con "listo" o con "no se pudo". No toques la pestaña mientras tanto.
-   - Si el `fetch` o `new Function` fallan por políticas de la página, pedí en APP `await PE.codigoTraer()` y ejecutá ese texto tal cual en la pestaña de AppSheet.
+   - Si el script no carga por políticas de la página, pedí en APP `await PE.codigoTraer()` y ejecutá ese texto tal cual en la pestaña de AppSheet.
 3. En APP: `await PE.actualizar()`.
 
 ## 2. Pasar cambios a AppSheet (escritura)
