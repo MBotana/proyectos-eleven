@@ -657,7 +657,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       if (!(await getS(env, 'gas_secret'))) await putS(env, 'gas_secret', b64u(rand(24)));
       return json({ ok: true });
     }
-    if (path === '/api/gas/secret' && m === 'GET') return json({ secret: (await getS(env, 'gas_secret')) || '' });
+    if (path === '/api/gas/secret' && m === 'GET') { if (!(await getS(env, 'gas_secret'))) await putS(env, 'gas_secret', b64u(rand(24))); return json({ secret: await getS(env, 'gas_secret') }); }
     if (path === '/api/planes' && m === 'GET') { const r: any = await env.DB.prepare('SELECT * FROM planes WHERE month = ?').bind(url.searchParams.get('month') ?? '').first(); return json(r ? { ...r, data: JSON.parse(r.data) } : null); }
     if (path === '/api/planes' && m === 'POST') {
       const b = await body(); if (!isMonth(b.month)) return fail('Mes inválido');

@@ -697,7 +697,7 @@ document.addEventListener('click', async (ev) => {
     case 'planvalidar': { const r = await api('/api/planes?month=' + S.f.planMes); await api('/api/planes', 'POST', { month: S.f.planMes, estado: 'pedida', data: r.data }); S.plan = null; render(); break; }
     case 'iamodelos': await api('/api/settings', 'POST', { gemini_model_texto: $('#mtexto').value, gemini_model_imagen: $('#mimagen').value }); S.iaEstado = null; toast('Modelos guardados'); await load(); break;
     case 'iaprueba': { $('#iamsg').textContent = 'Probando…'; try { const r = await api('/api/ia/prueba', 'POST'); $('#iamsg').textContent = `${r.modelo}: "${r.respuesta}" (${(r.ms / 1000).toFixed(1)} s)`; } catch (e) { $('#iamsg').textContent = e.message; } break; }
-    case 'gascode': { const { secret } = await api('/api/gas/secret'); if (!secret) { toast('Primero guardá la URL (o cualquier texto) para generar la clave del script'); break; } navigator.clipboard?.writeText(GAS_CODE.replace('__SECRET__', secret)).then(() => toast('Código copiado: pegalo en script.google.com')); break; }
+    case 'gascode': { const { secret } = await api('/api/gas/secret'); navigator.clipboard?.writeText(GAS_CODE.replace('__SECRET__', secret)).then(() => toast('Código copiado: pegalo en script.google.com')); break; }
     case 'iaredactar': await iaRedactarUI(el); break;
     case 'iaimagen': await iaImagenUI(el); break;
     case 'iatodo': await iaTodoUI(el); break;
