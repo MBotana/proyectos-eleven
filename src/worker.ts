@@ -3,7 +3,7 @@
  * El calendario se publica en /cal/<token>.ics para suscribirse desde Google Calendar. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SCHEMA, MIGRATIONS } from './schema.ts';
-import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays } from '../public/shared.js';
+import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays, tipoHoras, QUIEN } from '../public/shared.js';
 
 export interface Env { DB: any; ASSETS?: any }
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -17,6 +17,7 @@ const b64u = (buf: ArrayBuffer | Uint8Array) => {
   for (const b of u) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
+const unb64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const unb64u = (s: string) => { const p = '='.repeat((4 - s.length % 4) % 4), b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
 const sha256hex = async (s: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', enc(s)))].map(b => b.toString(16).padStart(2, '0')).join('');
 const rand = (n: number) => crypto.getRandomValues(new Uint8Array(n));
@@ -62,7 +63,7 @@ async function getS(env: Env, key: string): Promise<string | null> {
 async function putS(env: Env, key: string, value: string) {
   await env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(key, value).run();
 }
-const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '' };
+const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '' };
 
 // ---------- acceso (una sola cuenta: contraseña) ----------
 const PBKDF2_IT = 100000;
@@ -102,14 +103,15 @@ async function logAS(env: Env, entity: 'lb' | 'red', ref: string, label: string,
 }
 
 // ---------- tareas de link building ----------
-const LB_FIELDS = ['project', 'as_code', 'estado', 'usuario', 'url_publicacion', 'tipo_servicio', 'anchor', 'url_cliente', 'medio', 'dr', 'trafico', 'precio', 'moneda', 'estado_neg', 'mail_eleven', 'contacto_medio', 'deadline', 'notas'] as const;
+const LB_FIELDS = ['project', 'as_code', 'estado', 'usuario', 'url_publicacion', 'tipo_servicio', 'anchor', 'url_cliente', 'medio', 'dr', 'trafico', 'precio', 'moneda', 'estado_neg', 'mail_eleven', 'contacto_medio', 'deadline', 'notas', 'doc_url'] as const;
+const NO_AS = new Set(['notas', 'doc_url']);
 function cleanLB(b: any) {
   return {
     project: str(b.project, 40), as_code: str(b.as_code, 40).toUpperCase(), estado: str(b.estado, 80) || 'No Iniciado', usuario: str(b.usuario, 80) || YO, url_publicacion: str(b.url_publicacion, 500),
     tipo_servicio: oneOf(b.tipo_servicio, TIPOS_SERVICIO, 'Intervalo métrica 21-40'), anchor: str(b.anchor, 300), url_cliente: str(b.url_cliente, 500),
     medio: str(b.medio, 200), dr: numOrNull(b.dr), trafico: numOrNull(b.trafico), precio: numOrNull(b.precio), moneda: oneOf(b.moneda, [...MONEDAS, ''], 'USD'),
     estado_neg: str(b.estado_neg, 60), mail_eleven: str(b.mail_eleven, 120).toLowerCase(), contacto_medio: str(b.contacto_medio, 200),
-    deadline: isDate(b.deadline) ? b.deadline : '', notas: str(b.notas, 2000),
+    deadline: isDate(b.deadline) ? b.deadline : '', notas: str(b.notas, 2000), doc_url: str(b.doc_url, 500),
   };
 }
 async function saveLB(env: Env, b: any) {
@@ -120,28 +122,28 @@ async function saveLB(env: Env, b: any) {
     const old = await env.DB.prepare('SELECT * FROM lb_tasks WHERE id = ?').bind(b.id).first();
     if (!old) throw Object.assign(new Error('La tarea no existe'), { status: 404 });
     const changes: string[] = [];
-    for (const k of LB_FIELDS) if (k !== 'notas' && String(old[k] ?? '') !== String((v as any)[k] ?? '')) changes.push(`${k}: ${old[k] ?? '—'} → ${(v as any)[k] ?? '—'}`);
+    for (const k of LB_FIELDS) if (!NO_AS.has(k) && String(old[k] ?? '') !== String((v as any)[k] ?? '')) changes.push(`${k}: ${old[k] ?? '—'} → ${(v as any)[k] ?? '—'}`);
     const publicado = PUBLICADOS.has(v.estado) ? (old.publicado || hoy) : '';
-    await env.DB.prepare(`UPDATE lb_tasks SET ${LB_FIELDS.map(k => `${k} = ?`).join(', ')}, publicado = ?, updated_at = ? WHERE id = ?`)
-      .bind(...LB_FIELDS.map(k => (v as any)[k]), publicado, now, b.id).run();
+    await env.DB.prepare(`UPDATE lb_tasks SET ${LB_FIELDS.map(k => `${k} = ?`).join(', ')}, publicado = ?, updated_at = ?, estado_at = ? WHERE id = ?`)
+      .bind(...LB_FIELDS.map(k => (v as any)[k]), publicado, now, old.estado !== v.estado ? now : (old.estado_at ?? now), b.id).run();
     if (changes.length) await logAS(env, 'lb', b.id, label, changes.join(' · '));
     return b.id as string;
   }
   const id = newId();
-  await env.DB.prepare(`INSERT INTO lb_tasks (id, ${LB_FIELDS.join(', ')}, publicado, created_at, updated_at) VALUES (?, ${LB_FIELDS.map(() => '?').join(', ')}, ?, ?, ?)`)
-    .bind(id, ...LB_FIELDS.map(k => (v as any)[k]), PUBLICADOS.has(v.estado) ? hoy : '', now, now).run();
+  await env.DB.prepare(`INSERT INTO lb_tasks (id, ${LB_FIELDS.join(', ')}, publicado, created_at, updated_at, estado_at) VALUES (?, ${LB_FIELDS.map(() => '?').join(', ')}, ?, ?, ?, ?)`)
+    .bind(id, ...LB_FIELDS.map(k => (v as any)[k]), PUBLICADOS.has(v.estado) ? hoy : '', now, now, now).run();
   await logAS(env, 'lb', id, label, `Tarea nueva (${v.estado})`);
   return id;
 }
 
 // ---------- redacciones ----------
-const RED_FIELDS = ['project', 'as_code', 'tema', 'subproyecto', 'variante', 'idioma', 'pais', 'fecha_entrega', 'deadline_estado', 'prioridad', 'ia', 'estado', 'usuario', 'notas'] as const;
+const RED_FIELDS = ['project', 'as_code', 'tema', 'subproyecto', 'variante', 'idioma', 'pais', 'fecha_entrega', 'deadline_estado', 'prioridad', 'ia', 'estado', 'usuario', 'notas', 'doc_url'] as const;
 function cleanRED(b: any) {
   return {
     project: str(b.project, 40), as_code: str(b.as_code, 40).toUpperCase(), tema: str(b.tema, 300), subproyecto: str(b.subproyecto, 120), variante: str(b.variante, 120),
     deadline_estado: isDate(b.deadline_estado) ? b.deadline_estado : '', usuario: str(b.usuario, 80) || YO, idioma: str(b.idioma, 40) || 'Español', pais: str(b.pais, 60) || 'Argentina',
     fecha_entrega: isDate(b.fecha_entrega) ? b.fecha_entrega : '', prioridad: str(b.prioridad, 30) || 'Normal', ia: b.ia ? 1 : 0,
-    estado: str(b.estado, 80) || 'Pendiente', notas: str(b.notas, 2000),
+    estado: str(b.estado, 80) || 'Pendiente', notas: str(b.notas, 2000), doc_url: str(b.doc_url, 500),
   };
 }
 async function saveRED(env: Env, b: any) {
@@ -152,16 +154,16 @@ async function saveRED(env: Env, b: any) {
     const old = await env.DB.prepare('SELECT * FROM redacciones WHERE id = ?').bind(b.id).first();
     if (!old) throw Object.assign(new Error('La redacción no existe'), { status: 404 });
     const changes: string[] = [];
-    for (const k of RED_FIELDS) if (k !== 'notas' && String(old[k] ?? '') !== String((v as any)[k] ?? '')) changes.push(`${k}: ${old[k] ?? '—'} → ${(v as any)[k] ?? '—'}`);
+    for (const k of RED_FIELDS) if (!NO_AS.has(k) && String(old[k] ?? '') !== String((v as any)[k] ?? '')) changes.push(`${k}: ${old[k] ?? '—'} → ${(v as any)[k] ?? '—'}`);
     const entregada = old.entregada || '';
-    await env.DB.prepare(`UPDATE redacciones SET ${RED_FIELDS.map(k => `${k} = ?`).join(', ')}, entregada = ?, updated_at = ? WHERE id = ?`)
-      .bind(...RED_FIELDS.map(k => (v as any)[k]), entregada, now, b.id).run();
+    await env.DB.prepare(`UPDATE redacciones SET ${RED_FIELDS.map(k => `${k} = ?`).join(', ')}, entregada = ?, updated_at = ?, estado_at = ? WHERE id = ?`)
+      .bind(...RED_FIELDS.map(k => (v as any)[k]), entregada, now, old.estado !== v.estado ? now : (old.estado_at ?? now), b.id).run();
     if (changes.length) await logAS(env, 'red', b.id, `${v.project} · ${v.tema}`, changes.join(' · '));
     return b.id as string;
   }
   const id = newId();
-  await env.DB.prepare(`INSERT INTO redacciones (id, ${RED_FIELDS.join(', ')}, entregada, created_at, updated_at) VALUES (?, ${RED_FIELDS.map(() => '?').join(', ')}, ?, ?, ?)`)
-    .bind(id, ...RED_FIELDS.map(k => (v as any)[k]), '', now, now).run();
+  await env.DB.prepare(`INSERT INTO redacciones (id, ${RED_FIELDS.join(', ')}, entregada, created_at, updated_at, estado_at) VALUES (?, ${RED_FIELDS.map(() => '?').join(', ')}, ?, ?, ?, ?)`)
+    .bind(id, ...RED_FIELDS.map(k => (v as any)[k]), '', now, now, now).run();
   await logAS(env, 'red', id, `${v.project} · ${v.tema}`, 'Redacción nueva: cargar en AppSheet (Carga de Redacciones)');
   return id;
 }
@@ -198,21 +200,29 @@ export async function importAS(env: Env, b: any) {
     const code = str(r[0], 40).toUpperCase(), project = code.replace(/-\d+$/, '');
     if (!codes.has(project)) { out.saltadas++; continue; }
     const pub = asDate(r[9]);
-    await env.DB.prepare(`INSERT INTO lb_tasks (id, project, as_code, estado, usuario, tipo_servicio, anchor, medio, estado_neg, moneda, precio, mail_eleven, deadline, publicado, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    await env.DB.prepare(`INSERT INTO lb_tasks (id, project, as_code, estado, usuario, tipo_servicio, anchor, medio, estado_neg, moneda, precio, mail_eleven, deadline, publicado, created_at, updated_at, estado_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET estado = excluded.estado, usuario = excluded.usuario, tipo_servicio = excluded.tipo_servicio, anchor = excluded.anchor, medio = excluded.medio,
-        estado_neg = excluded.estado_neg, moneda = excluded.moneda, precio = excluded.precio, mail_eleven = excluded.mail_eleven, deadline = excluded.deadline, publicado = excluded.publicado, updated_at = excluded.updated_at`)
-      .bind(code, project, code, str(r[3], 80) || 'No Iniciado', str(r[10], 80), str(r[2], 60), str(r[4], 300), str(r[5], 200), str(r[6], 60), str(r[7], 8), asMoney(r[8]), str(r[11], 120).toLowerCase(), asDate(r[1]), pub, now, now).run();
+        estado_neg = excluded.estado_neg, moneda = excluded.moneda, precio = excluded.precio, mail_eleven = excluded.mail_eleven, deadline = excluded.deadline, publicado = excluded.publicado, updated_at = excluded.updated_at,
+        estado_at = CASE WHEN lb_tasks.estado = excluded.estado THEN COALESCE(lb_tasks.estado_at, excluded.estado_at) ELSE excluded.estado_at END`)
+      .bind(code, project, code, str(r[3], 80) || 'No Iniciado', str(r[10], 80), str(r[2], 60), str(r[4], 300), str(r[5], 200), str(r[6], 60), str(r[7], 8), asMoney(r[8]), str(r[11], 120).toLowerCase(), asDate(r[1]), pub, now, now, now).run();
+    // opcionales: [12] estado del pago, [13] aviso que muestra AppSheet, [14] URL de la publicación, [15] DR, [16] tráfico, [17] URL del cliente, [18] link del documento
+    if (r.length > 12) await env.DB.prepare(`UPDATE lb_tasks SET pago_estado = ?, as_aviso = ?, url_publicacion = CASE WHEN ? != '' THEN ? ELSE url_publicacion END, dr = COALESCE(?, dr), trafico = COALESCE(?, trafico),
+        url_cliente = CASE WHEN ? != '' THEN ? ELSE url_cliente END, doc_url = CASE WHEN ? != '' THEN ? ELSE doc_url END WHERE id = ?`)
+      .bind(str(r[12], 60), str(r[13], 500), str(r[14], 500), str(r[14], 500), numOrNull(r[15]), numOrNull(r[16]), str(r[17], 500), str(r[17], 500), str(r[18], 500), str(r[18], 500), code).run();
     out.lb++;
   }
   for (const r of Array.isArray(b.red) ? b.red : []) {
     const code = str(r[0], 40).toUpperCase(), project = code.replace(/-\d+$/, '');
     if (!codes.has(project)) { out.saltadas++; continue; }
-    await env.DB.prepare(`INSERT INTO redacciones (id, project, as_code, tema, pais, idioma, subproyecto, variante, fecha_entrega, prioridad, estado, deadline_estado, usuario, entregada, ia, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    await env.DB.prepare(`INSERT INTO redacciones (id, project, as_code, tema, pais, idioma, subproyecto, variante, fecha_entrega, prioridad, estado, deadline_estado, usuario, entregada, ia, created_at, updated_at, estado_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET tema = excluded.tema, pais = excluded.pais, idioma = excluded.idioma, subproyecto = excluded.subproyecto, variante = excluded.variante, fecha_entrega = excluded.fecha_entrega,
-        prioridad = excluded.prioridad, estado = excluded.estado, deadline_estado = excluded.deadline_estado, usuario = excluded.usuario, entregada = excluded.entregada, updated_at = excluded.updated_at`)
-      .bind(code, project, code, str(r[1], 300), str(r[2], 60), str(r[3], 40), str(r[4], 120), str(r[5], 120), asDate(r[6]), str(r[7], 30) || 'Normal', str(r[8], 80), asDate(r[9]), str(r[10], 80), asDate(r[11]), now, now).run();
+        prioridad = excluded.prioridad, estado = excluded.estado, deadline_estado = excluded.deadline_estado, usuario = excluded.usuario, entregada = excluded.entregada, updated_at = excluded.updated_at,
+        estado_at = CASE WHEN redacciones.estado = excluded.estado THEN COALESCE(redacciones.estado_at, excluded.estado_at) ELSE excluded.estado_at END`)
+      .bind(code, project, code, str(r[1], 300), str(r[2], 60), str(r[3], 40), str(r[4], 120), str(r[5], 120), asDate(r[6]), str(r[7], 30) || 'Normal', str(r[8], 80), asDate(r[9]), str(r[10], 80), asDate(r[11]), now, now, now).run();
+    // opcionales: [12] aviso de AppSheet, [13] link del documento
+    if (r.length > 12) await env.DB.prepare(`UPDATE redacciones SET as_aviso = ?, doc_url = CASE WHEN ? != '' THEN ? ELSE doc_url END WHERE id = ?`).bind(str(r[12], 500), str(r[13], 500), str(r[13], 500), code).run();
     out.red++;
   }
   await putS(env, 'as_sync_at', String(now));
@@ -307,17 +317,203 @@ export async function runAvisos(env: Env, origin: string, now = Date.now()) {
   return sent;
 }
 
+// ---------- registro automático de tiempo ----------
+type Ref = { kind: 'lb' | 'red'; ref: string };
+const refsKey = (refs: Ref[]) => JSON.stringify([...refs].map(r => ({ kind: r.kind === 'red' ? 'red' : 'lb', ref: str(r.ref, 60) })).sort((a, b) => (a.kind + a.ref).localeCompare(b.kind + b.ref)));
+const PING_MS = 90_000, GAP_MAX = 15 * 60_000;
+/** Mientras la app está en primer plano y estás trabajando en una tarea, suma tiempo a esa tarea (latido cada 30 s). */
+export async function actPing(env: Env, refs: Ref[], now = Date.now()) {
+  if (!refs.length) return;
+  const key = refsKey(refs), last = await env.DB.prepare("SELECT * FROM actividad WHERE quien = 'yo' ORDER BY fin DESC LIMIT 1").first();
+  if (last && last.refs === key && now - Number(last.fin) <= PING_MS && hoyEn(TZ, now) === last.fecha) { await env.DB.prepare('UPDATE actividad SET fin = ? WHERE id = ?').bind(now, last.id).run(); return; }
+  const desde = last ? Math.max(Number(last.fin), now - 30_000) : now - 30_000;
+  await env.DB.prepare("INSERT INTO actividad (quien, refs, accion, inicio, fin, fecha) VALUES ('yo', ?, '', ?, ?, ?)").bind(key, desde, now, hoyEn(TZ, now)).run();
+}
+/** Una acción (cambio de estado, guardar, envío) se lleva el tiempo desde la acción anterior (hasta 15 min): cubre lo que hiciste fuera de la app, como escribir el mail. */
+export async function actAccion(env: Env, refs: Ref[], accion: string, now = Date.now()) {
+  if (!refs.length) return;
+  const last = await env.DB.prepare("SELECT fin FROM actividad WHERE quien = 'yo' ORDER BY fin DESC LIMIT 1").first();
+  const gap = last ? now - Number(last.fin) : 0;
+  const desde = gap > 0 && gap <= GAP_MAX ? Number(last!.fin) : now - 60_000;
+  await env.DB.prepare("INSERT INTO actividad (quien, refs, accion, inicio, fin, fecha) VALUES ('yo', ?, ?, ?, ?, ?)").bind(refsKey(refs), str(accion, 80), desde, now, hoyEn(TZ, now)).run();
+}
+/** Tiempo de la IA, de Claude o de la sincronización con AppSheet sobre tareas concretas. */
+export async function actAgente(env: Env, quien: string, refs: Ref[], accion: string, inicio: number, fin: number) {
+  if (!refs.length || !(fin > inicio)) return;
+  await env.DB.prepare('INSERT INTO actividad (quien, refs, accion, inicio, fin, fecha) VALUES (?, ?, ?, ?, ?, ?)').bind(oneOf(quien, ['ia', 'claude', 'sync', 'yo'], 'claude'), refsKey(refs), str(accion, 80), inicio, fin, hoyEn(TZ, inicio)).run();
+}
+/** Horas automáticas por día, proyecto y tarea de la planilla (el tiempo de una acción sobre varias tareas se reparte en partes iguales). */
+export async function horasAuto(env: Env, desde: string) {
+  const rows = (await env.DB.prepare('SELECT * FROM actividad WHERE fecha >= ? ORDER BY inicio').bind(desde).all()).results as any[];
+  if (!rows.length) return [];
+  const lb = new Map(((await env.DB.prepare('SELECT id, project, estado FROM lb_tasks').all()).results as any[]).map(t => [t.id, t]));
+  const red = new Map(((await env.DB.prepare('SELECT id, project, estado, ia FROM redacciones').all()).results as any[]).map(t => [t.id, t]));
+  const plan = (await env.DB.prepare('SELECT * FROM plan WHERE month >= ?').bind(desde.slice(0, 7)).all()).results as any[];
+  const acc = new Map<string, { date: string; project: string; task_type: string; s: number; por: Record<string, number> }>();
+  for (const a of rows) {
+    let refs: Ref[] = []; try { refs = JSON.parse(a.refs); } catch { /* fila rota */ }
+    const seg = Math.max(0, (Number(a.fin) - Number(a.inicio)) / 1000) / (refs.length || 1);
+    for (const r of refs) {
+      const t = (r.kind === 'red' ? red : lb).get(r.ref); if (!t) continue;
+      const tipo = tipoHoras(r.kind, t, plan.filter(p => p.month === a.fecha.slice(0, 7))), k = `${a.fecha}|${t.project}|${tipo}`;
+      const o = acc.get(k) || { date: a.fecha, project: t.project, task_type: tipo, s: 0, por: {} };
+      o.s += seg; o.por[a.quien] = (o.por[a.quien] || 0) + seg; acc.set(k, o);
+    }
+  }
+  return [...acc.entries()].filter(([, o]) => o.s >= 30).map(([k, o]) => ({
+    id: 'auto:' + k, date: o.date, project: o.project, task_type: o.task_type, hours: Math.round(o.s / 36) / 100, auto: 1, created_at: 0,
+    note: 'Automático · ' + Object.entries(o.por).map(([q, s]) => `${(QUIEN as any)[q] || q} ${Math.round(s / 60)} min`).join(' · '),
+  }));
+}
+
+// ---------- cambio de estado en lote ----------
+async function bulkEstado(env: Env, b: any) {
+  const kind = b.kind === 'red' ? 'red' : 'lb', ids: string[] = Array.isArray(b.ids) ? b.ids.map((x: unknown) => str(x, 60)).filter(Boolean).slice(0, 500) : [];
+  const estado = str(b.estado, 80); if (!estado || !ids.length) throw Object.assign(new Error('Elegí tareas y un estado'), { status: 400 });
+  const table = kind === 'lb' ? 'lb_tasks' : 'redacciones', now = Date.now(), hoy = hoyEn(TZ, now); let n = 0;
+  for (const id of ids) {
+    const t = await env.DB.prepare(`SELECT * FROM ${table} WHERE id = ?`).bind(id).first(); if (!t || t.estado === estado) continue;
+    if (kind === 'lb') await env.DB.prepare('UPDATE lb_tasks SET estado = ?, estado_at = ?, updated_at = ?, publicado = ? WHERE id = ?').bind(estado, now, now, PUBLICADOS.has(estado) ? (t.publicado || hoy) : '', id).run();
+    else await env.DB.prepare('UPDATE redacciones SET estado = ?, estado_at = ?, updated_at = ? WHERE id = ?').bind(estado, now, now, id).run();
+    await logAS(env, kind, id, t.as_code || `${t.project} · ${t.anchor || t.tema || ''}`, `estado: ${t.estado} → ${estado} (en lote)`); n++;
+  }
+  await actAccion(env, ids.map(ref => ({ kind, ref })), `Cambio de estado en lote → ${estado}`, now);
+  return n;
+}
+
+// ---------- compilado de medios ----------
+const MEDIO_COLS = ['dominio', 'estado', 'mail', 'dr', 'trafico', 'pais', 'idioma', 'sensible', 'precio_usd', 'precio', 'moneda', 'vence', 'proveedor', 'actualizado'] as const;
+export async function importMedios(env: Env, b: any) {
+  const rows: any[] = Array.isArray(b.rows) ? b.rows.slice(0, 2000) : [];
+  if (b.reset) await env.DB.prepare('DELETE FROM medios').run();
+  const st = env.DB.prepare(`INSERT INTO medios (${MEDIO_COLS.join(', ')}) VALUES (${MEDIO_COLS.map(() => '?').join(', ')}) ON CONFLICT(dominio) DO UPDATE SET ${MEDIO_COLS.slice(1).map(k => `${k} = excluded.${k}`).join(', ')}`);
+  const vals = rows.filter(r => r && r.dominio).map(r => st.bind(str(r.dominio, 200).toLowerCase(), str(r.estado, 20), str(r.mail, 120).toLowerCase(), numOrNull(r.dr), numOrNull(r.trafico), str(r.pais, 60), str(r.idioma, 30), r.sensible ? 1 : 0, numOrNull(r.precio_usd), numOrNull(r.precio), str(r.moneda, 8), str(r.vence, 10), str(r.proveedor, 120), str(r.actualizado, 10)));
+  for (let i = 0; i < vals.length; i += 100) await env.DB.batch(vals.slice(i, i + 100));
+  if (b.last) await putS(env, 'medios_at', String(Date.now()));
+  return vals.length;
+}
+
+// ---------- IA (Gemini) ----------
+const GEM = 'https://generativelanguage.googleapis.com/v1beta';
+async function gemKey(env: Env) { const k = await getS(env, 'gemini_key'); if (!k) throw Object.assign(new Error('Falta conectar Gemini (Ajustes → IA)'), { status: 400 }); return k; }
+export async function gemModelos(env: Env, key?: string) {
+  const r = await fetch(`${GEM}/models?pageSize=200`, { headers: { 'x-goog-api-key': key ?? await gemKey(env) } });
+  const j: any = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j?.error?.message || `Gemini respondió ${r.status}`), { status: 400 });
+  return ((j.models || []) as any[]).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => String(m.name).replace(/^models\//, ''));
+}
+const ver = (n: string) => Number((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+export function elegirModelos(lista: string[]) {
+  const limpio = (n: string) => !/(tts|audio|live|embedding|aqa|learnlm|robotics|computer|preview-\d|exp|lite)/.test(n);
+  const txt = lista.filter(n => /^gemini-/.test(n) && !/image/.test(n) && limpio(n)).sort((a, b) => ver(b) - ver(a) || (/pro/.test(b) ? 1 : 0) - (/pro/.test(a) ? 1 : 0));
+  const img = lista.filter(n => /^gemini-.*image/.test(n) && !/preview/.test(n)).sort((a, b) => ver(b) - ver(a) || (/flash/.test(b) ? 1 : 0) - (/flash/.test(a) ? 1 : 0));
+  return { texto: txt[0] || '', imagen: img[0] || lista.find(n => /image/.test(n)) || '' };
+}
+async function gemGenerar(env: Env, model: string, prompt: string, imagen = false) {
+  const r = await fetch(`${GEM}/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST', headers: { 'x-goog-api-key': await gemKey(env), 'content-type': 'application/json' },
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: imagen ? { responseModalities: ['IMAGE'] } : { temperature: 0.8 } }),
+  });
+  const j: any = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j?.error?.message || `Gemini respondió ${r.status}`), { status: 502 });
+  const parts: any[] = j?.candidates?.[0]?.content?.parts || [];
+  return { text: parts.filter(p => p.text).map(p => p.text).join(''), img: parts.find(p => p.inlineData)?.inlineData as { mimeType: string; data: string } | undefined };
+}
+const PROMPT_BASE: Record<string, string> = {
+  lb: `Escribí un artículo en {idioma} para publicar en el medio {medio} ({pais}). Tiene que sonar editorial, útil para el lector del medio y no publicitario.
+Incluí una sola vez, de forma natural y en el cuerpo del texto, el enlace con el texto ancla exacto "{anchor}" apuntando a {url_cliente}. Mínimo {palabras_min} palabras.
+Formato de salida: primera línea "TÍTULO: <título>", después el cuerpo en Markdown con subtítulos (##). Marcá el enlace como [{anchor}]({url_cliente}).`,
+  red: `Escribí en {idioma} ({pais}) el contenido para "{tema}" del cliente {cliente}.{subproyecto_linea}
+Formato de salida: primera línea "TÍTULO: <título>", después el cuerpo en Markdown con subtítulos (##).{material_linea}`,
+  imagen: `Fotografía editorial horizontal 16:9, realista, sin texto ni logos, que ilustre el artículo "{titulo}". Luz natural, colores sobrios.`,
+};
+async function promptDe(env: Env, project: string, claves: string[]) {
+  for (const c of claves) { const r = await env.DB.prepare('SELECT texto FROM prompts WHERE project = ? AND clave = ?').bind(project, c).first(); if (r && String(r.texto).trim()) return String(r.texto); }
+  return '';
+}
+const rellenar = (tpl: string, v: Record<string, string>) => tpl.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
+async function varsTarea(env: Env, kind: 'lb' | 'red', ref: string, extra: Record<string, string> = {}) {
+  const t: any = await env.DB.prepare(`SELECT * FROM ${kind === 'lb' ? 'lb_tasks' : 'redacciones'} WHERE id = ?`).bind(ref).first();
+  if (!t) throw Object.assign(new Error('La tarea no existe'), { status: 404 });
+  const p: any = await env.DB.prepare('SELECT * FROM projects WHERE code = ?').bind(t.project).first();
+  const pp = JSON.parse(p?.params || '{}'), tx: any = await env.DB.prepare('SELECT titulo, cuerpo FROM textos WHERE kind = ? AND ref = ?').bind(kind, ref).first();
+  const v: Record<string, string> = {
+    codigo: t.as_code || '', proyecto: t.project, cliente: p?.cliente || '', dominio_cliente: pp.dominio || '', anchor: t.anchor || '', url_cliente: t.url_cliente || '',
+    medio: (t.medio || '').replace(/^https?:\/\//, ''), dr: String(t.dr ?? ''), palabras_min: String(pp.palabrasMin ?? 500), pais: t.pais || pp.paises || 'Argentina', idioma: t.idioma || 'Español',
+    tema: t.tema || '', subproyecto: t.subproyecto || '', variante: t.variante || '', titulo: extra.titulo || tx?.titulo || t.tema || t.anchor || '', texto: (tx?.cuerpo || '').slice(0, 4000), material: extra.material || '',
+  };
+  v.subproyecto_linea = v.subproyecto ? `\nTipo de pieza: ${v.subproyecto}${v.variante ? ' · ' + v.variante : ''}.` : '';
+  v.material_linea = v.material ? `\n\nMaterial de base que te paso (usalo como fuente, no lo copies textual):\n${v.material}` : '';
+  return { t, v };
+}
+export async function iaRedactar(env: Env, b: any) {
+  const kind = b.kind === 'red' ? 'red' : 'lb', ref = str(b.ref, 60), { t, v } = await varsTarea(env, kind, ref, { material: str(b.material, 20000) });
+  const tpl = (await promptDe(env, t.project, kind === 'red' && t.subproyecto ? [`red:${t.subproyecto}`, 'red'] : [kind])) || PROMPT_BASE[kind];
+  const model = (await getS(env, 'gemini_model_texto')) || elegirModelos(await gemModelos(env)).texto, t0 = Date.now();
+  const { text } = await gemGenerar(env, model, rellenar(tpl, v));
+  if (!text.trim()) throw Object.assign(new Error('Gemini no devolvió texto'), { status: 502 });
+  const m = text.match(/^\s*\**T[ÍI]TULO:?\**\s*(.+)\n+/i), titulo = (m ? m[1] : '').replace(/[*#]/g, '').trim(), cuerpo = (m ? text.slice(m[0].length) : text).trim();
+  const palabras = (cuerpo.match(/[\p{L}\p{N}]+/gu) || []).length, now = Date.now();
+  await env.DB.prepare('INSERT INTO textos (kind, ref, titulo, cuerpo, url, palabras, lista, updated_at) VALUES (?, ?, ?, ?, \'\', ?, 0, ?) ON CONFLICT(kind, ref) DO UPDATE SET titulo = excluded.titulo, cuerpo = excluded.cuerpo, palabras = excluded.palabras, updated_at = excluded.updated_at')
+    .bind(kind, ref, titulo, cuerpo, palabras, now).run();
+  await actAgente(env, 'ia', [{ kind, ref }], 'Redacción con IA', t0, now);
+  return { titulo, cuerpo, palabras, modelo: model, segundos: Math.round((now - t0) / 1000) };
+}
+export async function iaImagen(env: Env, b: any) {
+  const kind = b.kind === 'red' ? 'red' : 'lb', ref = str(b.ref, 60), { t, v } = await varsTarea(env, kind, ref, { titulo: str(b.titulo, 300) });
+  const tpl = (await promptDe(env, t.project, kind === 'red' && t.subproyecto ? [`imagen:${t.subproyecto}`, 'imagen'] : ['imagen'])) || PROMPT_BASE.imagen;
+  const model = (await getS(env, 'gemini_model_imagen')) || elegirModelos(await gemModelos(env)).imagen, t0 = Date.now();
+  if (!model) throw Object.assign(new Error('Tu cuenta de Gemini no tiene un modelo de imágenes disponible'), { status: 400 });
+  const { img } = await gemGenerar(env, model, rellenar(tpl, v), true);
+  if (!img) throw Object.assign(new Error('Gemini no devolvió una imagen (probá de nuevo o ajustá el prompt)'), { status: 502 });
+  await env.DB.prepare('DELETE FROM imagenes WHERE kind = ? AND ref = ?').bind(kind, ref).run();
+  const CH = 600_000;
+  for (let i = 0; i * CH < img.data.length; i++) await env.DB.prepare('INSERT INTO imagenes (kind, ref, seq, mime, data) VALUES (?, ?, ?, ?, ?)').bind(kind, ref, i, img.mimeType, img.data.slice(i * CH, (i + 1) * CH)).run();
+  await actAgente(env, 'ia', [{ kind, ref }], 'Imagen con IA', t0, Date.now());
+  return { ok: true, modelo: model };
+}
+async function imagenDe(env: Env, kind: string, ref: string) {
+  const rows = (await env.DB.prepare('SELECT mime, data FROM imagenes WHERE kind = ? AND ref = ? ORDER BY seq').bind(kind, ref).all()).results as any[];
+  return rows.length ? { mime: rows[0].mime as string, data: rows.map(r => r.data).join('') } : null;
+}
+
+// ---------- envío al Google Doc (Apps Script con tu cuenta de Eleven) ----------
+async function enviarDoc(env: Env, b: any) {
+  const url = await getS(env, 'gas_url'), secret = await getS(env, 'gas_secret');
+  if (!url || !secret) throw Object.assign(new Error('Falta conectar el script de Google (Ajustes → Google Docs)'), { status: 400 });
+  const kind = b.kind === 'red' ? 'red' : 'lb', ref = str(b.ref, 60);
+  const t: any = await env.DB.prepare(`SELECT * FROM ${kind === 'lb' ? 'lb_tasks' : 'redacciones'} WHERE id = ?`).bind(ref).first();
+  const tx: any = await env.DB.prepare('SELECT * FROM textos WHERE kind = ? AND ref = ?').bind(kind, ref).first();
+  if (!t || !tx?.cuerpo) throw Object.assign(new Error('No hay texto para enviar'), { status: 400 });
+  const doc = str(b.doc_url, 500) || tx.url || t.doc_url; const img = b.conImagen ? await imagenDe(env, kind, ref) : null, t0 = Date.now();
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, redirect: 'follow', body: JSON.stringify({ secret, doc, codigo: t.as_code, titulo: tx.titulo, cuerpo: tx.cuerpo, imagen: img }) });
+  const j: any = await r.json().catch(() => ({ error: 'El script no respondió JSON (¿está publicado como aplicación web?)' }));
+  if (!r.ok || j.error) throw Object.assign(new Error(j.error || `El script respondió ${r.status}`), { status: 502 });
+  if (j.doc && j.doc !== tx.url) await env.DB.prepare('UPDATE textos SET url = ? WHERE kind = ? AND ref = ?').bind(j.doc, kind, ref).run();
+  await actAgente(env, 'ia', [{ kind, ref }], 'Texto enviado al documento', t0, Date.now());
+  return { ok: true, doc: j.doc || doc };
+}
+
 // ---------- lectura de todo ----------
 async function allData(env: Env) {
   const q = async (sql: string) => (await env.DB.prepare(sql).all()).results;
   const projects = ((await q('SELECT * FROM projects ORDER BY orden')) as any[]).map(p => ({ ...p, params: JSON.parse(p.params || '{}') }));
   const settings: Record<string, string> = {};
   for (const k of Object.keys(PUBLIC_SETTINGS)) settings[k] = (await getS(env, k)) ?? PUBLIC_SETTINGS[k];
+  settings.gemini = (await getS(env, 'gemini_key')) ? '1' : '';
+  settings.gas = (await getS(env, 'gas_secret')) && settings.gas_url ? '1' : '';
+  const hoy = hoyEn(TZ), desde = addDays(hoy.slice(0, 7) + '-01', -31);
+  const auto = await horasAuto(env, desde);
   return {
     projects,
     lb: await q('SELECT * FROM lb_tasks ORDER BY CASE WHEN deadline = \'\' THEN 1 ELSE 0 END, deadline, created_at'),
     red: await q('SELECT * FROM redacciones ORDER BY CASE WHEN fecha_entrega = \'\' THEN 1 ELSE 0 END, fecha_entrega, created_at'),
-    hours: await q('SELECT * FROM hours ORDER BY date DESC, created_at DESC'),
+    hours: [...auto, ...(await q('SELECT * FROM hours ORDER BY date DESC, created_at DESC')) as any[]].sort((a, b) => b.date.localeCompare(a.date)),
+    actividad: await q(`SELECT id, quien, refs, accion, inicio, fin FROM actividad WHERE fecha = '${hoy}' ORDER BY inicio`),
+    notas: await q('SELECT * FROM notas ORDER BY hecha, created_at DESC'),
+    prompts: await q('SELECT * FROM prompts ORDER BY project, clave'),
+    planes: await q('SELECT month, estado, validacion, updated_at FROM planes ORDER BY month DESC'),
+    medios_n: Number(((await env.DB.prepare('SELECT COUNT(*) AS n FROM medios').first()) as any)?.n ?? 0),
     plan: await q('SELECT * FROM plan ORDER BY month, project, task_type'),
     as_pend: await q('SELECT * FROM as_log WHERE done = 0 ORDER BY at'),
     textos: await q('SELECT kind, ref, palabras, lista, updated_at FROM textos'),
@@ -348,6 +544,14 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const r = await importAS(env, await body());
       return new Response(JSON.stringify(r), { headers: { ...cors, 'content-type': 'application/json' } });
     }
+    // compilado de medios desde la planilla de Google (la abro yo en el navegador con tu sesión de Eleven)
+    if (path === '/api/medios/import-key') {
+      const cors = { 'access-control-allow-origin': 'https://docs.google.com', 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-import-key', 'access-control-max-age': '600' };
+      if (m === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+      const key = await getS(env, 'import_key'), given = req.headers.get('x-import-key') ?? '';
+      if (m !== 'POST' || !key || key.length < 20 || !sameStr(given, key)) return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401, headers: { ...cors, 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ n: await importMedios(env, await body()) }), { headers: { ...cors, 'content-type': 'application/json' } });
+    }
     if (path === '/api/state' && m === 'GET') return json({ setup: !(await getS(env, 'pw')) });
     if (path === '/api/setup' && m === 'POST') {
       if (await getS(env, 'pw')) return fail('La contraseña ya está creada', 409);
@@ -373,8 +577,66 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const tok = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
       await env.DB.prepare('DELETE FROM sessions WHERE th = ?').bind(await sha256hex(tok)).run(); return json({ ok: true });
     }
-    if (path === '/api/lb' && m === 'POST') return json({ id: await saveLB(env, await body()) });
-    if (path === '/api/red' && m === 'POST') return json({ id: await saveRED(env, await body()) });
+    if (path === '/api/lb' && m === 'POST') { const id = await saveLB(env, await body()); await actAccion(env, [{ kind: 'lb', ref: id }], 'Guardar tarea'); return json({ id }); }
+    if (path === '/api/red' && m === 'POST') { const id = await saveRED(env, await body()); await actAccion(env, [{ kind: 'red', ref: id }], 'Guardar redacción'); return json({ id }); }
+    if (path === '/api/bulk' && m === 'POST') return json({ n: await bulkEstado(env, await body()) });
+    if (path === '/api/act/ping' && m === 'POST') { const b = await body(); await actPing(env, Array.isArray(b.refs) ? b.refs.slice(0, 50) : []); return json({ ok: true }); }
+    if (path === '/api/act/accion' && m === 'POST') { const b = await body(); await actAccion(env, Array.isArray(b.refs) ? b.refs.slice(0, 500) : [], str(b.accion, 80)); return json({ ok: true }); }
+    if (path === '/api/act/agente' && m === 'POST') { const b = await body(); await actAgente(env, str(b.quien, 10), Array.isArray(b.refs) ? b.refs.slice(0, 500) : [], str(b.accion, 80), Number(b.inicio), Number(b.fin)); return json({ ok: true }); }
+    if (path === '/api/medios' && m === 'GET') return json((await env.DB.prepare('SELECT * FROM medios').all()).results);
+    if (path === '/api/medios/import' && m === 'POST') return json({ n: await importMedios(env, await body()) });
+    if (path === '/api/notas' && m === 'POST') {
+      const b = await body(), id = str(b.id, 40) || newId();
+      if (!str(b.texto, 2000)) return fail('Escribí la nota');
+      await env.DB.prepare('INSERT INTO notas (id, texto, kind, ref, lider, hecha, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET texto = excluded.texto, lider = excluded.lider, hecha = excluded.hecha')
+        .bind(id, str(b.texto, 2000), str(b.kind, 4), str(b.ref, 60), b.lider ? 1 : 0, b.hecha ? 1 : 0, Date.now()).run();
+      return json({ id });
+    }
+    const delNota = path.match(/^\/api\/notas\/([\w-]+)$/);
+    if (delNota && m === 'DELETE') { await env.DB.prepare('DELETE FROM notas WHERE id = ?').bind(delNota[1]).run(); return json({ ok: true }); }
+    if (path === '/api/prompts' && m === 'POST') {
+      const b = await body(), project = str(b.project, 40), clave = str(b.clave, 80);
+      if (!project || !clave) return fail('Falta proyecto o tipo');
+      await env.DB.prepare('INSERT INTO prompts (project, clave, texto, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(project, clave) DO UPDATE SET texto = excluded.texto, updated_at = excluded.updated_at').bind(project, clave, typeof b.texto === 'string' ? b.texto.slice(0, 30000) : '', Date.now()).run();
+      return json({ ok: true });
+    }
+    if (path === '/api/ia/key' && m === 'POST') {
+      const b = await body(), key = str(b.key, 200); if (key.length < 20) return fail('La clave no parece válida');
+      const lista = await gemModelos(env, key), el = elegirModelos(lista);
+      await putS(env, 'gemini_key', key); await putS(env, 'gemini_model_texto', el.texto); await putS(env, 'gemini_model_imagen', el.imagen);
+      return json({ ok: true, ...el, modelos: lista });
+    }
+    if (path === '/api/ia/estado' && m === 'GET') {
+      if (!(await getS(env, 'gemini_key'))) return json({ conectado: false });
+      try { const lista = await gemModelos(env); return json({ conectado: true, modelos: lista, texto: await getS(env, 'gemini_model_texto'), imagen: await getS(env, 'gemini_model_imagen') }); }
+      catch (e: any) { return json({ conectado: false, error: e.message }); }
+    }
+    if (path === '/api/ia/prueba' && m === 'POST') {
+      const model = (await getS(env, 'gemini_model_texto')) || '', t0 = Date.now();
+      const r = await gemGenerar(env, model, 'Respondé solo: "Conexión OK" y el nombre de tu modelo.');
+      return json({ ok: true, modelo: model, respuesta: r.text.trim().slice(0, 200), ms: Date.now() - t0 });
+    }
+    if (path === '/api/ia/redactar' && m === 'POST') return json(await iaRedactar(env, await body()));
+    if (path === '/api/ia/imagen' && m === 'POST') return json(await iaImagen(env, await body()));
+    if (path === '/api/imagen' && m === 'GET') {
+      const im = await imagenDe(env, url.searchParams.get('kind') ?? '', url.searchParams.get('ref') ?? '');
+      if (!im) return new Response(null, { status: 204 });
+      return new Response(unb64(im.data), { headers: { 'content-type': im.mime, 'cache-control': 'no-store' } });
+    }
+    if (path === '/api/doc/enviar' && m === 'POST') return json(await enviarDoc(env, await body()));
+    if (path === '/api/gas' && m === 'POST') {
+      const b = await body(); await putS(env, 'gas_url', str(b.url, 500));
+      if (!(await getS(env, 'gas_secret'))) await putS(env, 'gas_secret', b64u(rand(24)));
+      return json({ ok: true });
+    }
+    if (path === '/api/gas/secret' && m === 'GET') return json({ secret: (await getS(env, 'gas_secret')) || '' });
+    if (path === '/api/planes' && m === 'GET') { const r: any = await env.DB.prepare('SELECT * FROM planes WHERE month = ?').bind(url.searchParams.get('month') ?? '').first(); return json(r ? { ...r, data: JSON.parse(r.data) } : null); }
+    if (path === '/api/planes' && m === 'POST') {
+      const b = await body(); if (!isMonth(b.month)) return fail('Mes inválido');
+      await env.DB.prepare("INSERT INTO planes (month, estado, data, validacion, updated_at) VALUES (?, ?, ?, '', ?) ON CONFLICT(month) DO UPDATE SET estado = excluded.estado, data = excluded.data, validacion = CASE WHEN excluded.estado = 'borrador' THEN '' ELSE planes.validacion END, updated_at = excluded.updated_at")
+        .bind(b.month, oneOf(b.estado, ['borrador', 'pedida', 'validada'], 'borrador'), JSON.stringify(b.data ?? {}).slice(0, 900000), Date.now()).run();
+      return json({ ok: true });
+    }
     if (path === '/api/hours' && m === 'POST') return json({ id: await saveHours(env, await body()) });
     const del = path.match(/^\/api\/(lb|red|hours)\/([\w-]+)$/);
     if (del && m === 'DELETE') {
@@ -403,7 +665,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (path === '/api/projects' && m === 'POST') {
       const b = await body(); if (!Array.isArray(b.projects)) return fail('Faltan los proyectos');
       for (const p of b.projects) {
-        const pr = p.params || {}, params = { drMin: numOrNull(pr.drMin), trafMin: numOrNull(pr.trafMin), precioMaxUSD: numOrNull(pr.precioMaxUSD), repDias: numOrNull(pr.repDias), palabrasMin: numOrNull(pr.palabrasMin), dominio: str(pr.dominio, 120), paises: str(pr.paises, 120), servicio: str(pr.servicio, 60) };
+        const pr = p.params || {}, params = { drMin: numOrNull(pr.drMin), trafMin: numOrNull(pr.trafMin), precioMaxUSD: numOrNull(pr.precioMaxUSD), repDias: numOrNull(pr.repDias), palabrasMin: numOrNull(pr.palabrasMin), presupuestoUSD: numOrNull(pr.presupuestoUSD), dominio: str(pr.dominio, 120), paises: str(pr.paises, 120), servicio: str(pr.servicio, 60) };
         await env.DB.prepare('UPDATE projects SET cliente = ?, active = ?, params = ? WHERE code = ?').bind(str(p.cliente, 80), p.active ? 1 : 0, JSON.stringify(params), str(p.code, 40)).run();
       }
       return json({ ok: true });

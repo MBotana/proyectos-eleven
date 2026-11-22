@@ -3,12 +3,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { handle, runAvisos, resumenDeadlines } from '../src/worker.ts';
-import { avisosLB, hoyEn, addDays } from '../public/shared.js';
+import { avisosLB, hoyEn, addDays, compiladoAMedios, aptoMedio, planificar, alertas, PROYECTOS_INICIALES } from '../public/shared.js';
+import { actPing, actAccion, actAgente, horasAuto, elegirModelos } from '../src/worker.ts';
 
 function mkEnv() {
   const db = new DatabaseSync(':memory:');
-  const DB = { prepare: (sql: string) => { const st = db.prepare(sql); let a: any[] = [];
-    const o: any = { bind: (...x: any[]) => { a = x; return o; }, first: async () => st.get(...a) ?? null, all: async () => ({ results: st.all(...a) }), run: async () => { st.run(...a); return {}; } }; return o; } };
+  const mk = (st: any, a: any[]): any => ({ bind: (...x: any[]) => mk(st, x), first: async () => st.get(...a) ?? null, all: async () => ({ results: st.all(...a) }), run: async () => { st.run(...a); return {}; } });
+  const DB = { prepare: (sql: string) => mk(db.prepare(sql), []) };
+  (DB as any).batch = async (sts: any[]) => { for (const st of sts) await st.run(); return []; };
   return { DB };
 }
 const call = async (env: any, path: string, method = 'GET', body?: unknown, token?: string) => {
@@ -56,8 +58,8 @@ test('tareas, cambios para AppSheet, horas y calendario', async () => {
   await call(env, '/api/hours', 'POST', { project: 'TEL-LIN-2', task_type: 'A - Creación de links', hours: 1.5 }, tok);
   await call(env, '/api/hours', 'POST', { project: 'TEL-RED-2', task_type: 'no existe', hours: 1 }, tok);
   d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
-  assert.equal(d.hours.length, 2);
-  assert.equal(d.hours.find((x: any) => x.project === 'TEL-RED-2').task_type, 'A - Redacción manual', 'tarea inválida → primera del tipo');
+  assert.equal(d.hours.filter((x: any) => !x.auto).length, 2);
+  assert.equal(d.hours.find((x: any) => x.project === 'TEL-RED-2' && !x.auto).task_type, 'A - Redacción manual', 'tarea inválida → primera del tipo');
 
   const cal = (await call(env, '/api/calendar', 'GET', undefined, tok)).j.url as string;
   const ics = await call(env, new URL(cal).pathname);
@@ -129,4 +131,94 @@ test('redacción manual de una tarea', async () => {
   assert.equal(d.textos[0].palabras, 5);
   assert.match(d.as_pend.at(-1).change, /Redacción lista/);
   assert.equal((await call(env, '/api/texto', 'POST', { kind: 'lb', ref: 'no-existe', cuerpo: 'x' }, tok)).status, 404);
+});
+
+test('cambio de estado en lote y registro automático de tiempo', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1' })).j.token;
+  const a = (await call(env, '/api/lb', 'POST', { project: 'NAV-LIN-5', anchor: 'a', estado: 'Gestión de Backlink' }, tok)).j.id;
+  const b = (await call(env, '/api/lb', 'POST', { project: 'XUB-LIN-1', anchor: 'b', estado: 'Gestión de Backlink' }, tok)).j.id;
+  const r = await call(env, '/api/bulk', 'POST', { kind: 'lb', ids: [a, b], estado: 'Para Enviar' }, tok);
+  assert.equal(r.j.n, 2);
+  let d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.ok(d.lb.every((t: any) => t.estado === 'Para Enviar'));
+  assert.equal(d.as_pend.filter((x: any) => /en lote/.test(x.change)).length, 2);
+  // tiempo: latidos sobre una tarea + acción sobre dos tareas de proyectos distintos (se reparte) + IA
+  await env.DB.prepare('DELETE FROM actividad').run();
+  const t0 = Date.now() - 3600_000;
+  await actPing(env, [{ kind: 'lb', ref: a }], t0);
+  for (let i = 1; i <= 20; i++) await actPing(env, [{ kind: 'lb', ref: a }], t0 + i * 30_000); // 10 min en NAV
+  await actAccion(env, [{ kind: 'lb', ref: a }, { kind: 'lb', ref: b }], 'Enviado', t0 + 20 * 30_000 + 10 * 60_000); // 10 min repartidos
+  await actAgente(env, 'ia', [{ kind: 'lb', ref: b }], 'Redacción', t0, t0 + 120_000);
+  const hs = await horasAuto(env, addDays(hoyEn(), -2));
+  const nav = hs.find((x: any) => x.project === 'NAV-LIN-5'), xub = hs.find((x: any) => x.project === 'XUB-LIN-1');
+  assert.ok(Math.abs(nav.hours - 0.26) < 0.02, 'NAV ' + nav.hours);   // 30 s + 10 min + 5 min
+  assert.ok(Math.abs(xub.hours - 0.12) < 0.02, 'XUB ' + xub.hours);   // 5 min + 2 min de IA
+  assert.match(xub.note, /IA \(Gemini\) 2 min/);
+  d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.ok(d.hours.some((x: any) => x.auto && x.project === 'NAV-LIN-5'));
+});
+
+test('compilado de medios: importa lo que importa y valida por proyecto', async () => {
+  const csv = 'Última Actualización (UTC):,2026-11-22\nDominio,Estado,Proveedor,media_id,Categorías,Tráfico,DR,Fecha Actualización Métricas,País Principal,Idioma,Admite temática sensible,Deal Precio,Deal Moneda,Deal Precio (USD),Deal Vencimiento,Cuenta Avatar\nmedia_domain,media_status,x,x,x,x,x,x,x,x,x,x,x,x,x,x\n'
+    + 'diario.com.ar,Activo,Prov,id1,"News, Politics",1.500,35,20/11/2026,Argentina,Español,,"120,00",USD,120,31/12/2026,laura@eleven-agencia.net\n'
+    + 'diario.com.ar,Activo,Prov2,id1,News,1.500,35,20/11/2026,Argentina,Español,,"80,00",USD,80,31/12/2026,laura@eleven-agencia.net\n'
+    + 'viejo.com.ar,Activo,Prov,id2,News,800,25,20/11/2026,Argentina,Español,,"50,00",USD,50,31/10/2026,sofia@eleven-agencia.org\n'
+    + 'br.com.br,Activo,P,id3,News,9.000,50,20/11/2026,Brasil,Portugués,,,,,,\n'
+    + 'co.com.co,Default,,id4,News,2.000,30,20/11/2026,Colombia,Español,,,,,,\n';
+  const ms = compiladoAMedios(csv, { hoy: '2026-11-22' });
+  assert.equal(ms.length, 3, 'sin portugués');
+  const d = ms.find((m: any) => m.dominio === 'diario.com.ar');
+  assert.equal(d.precio_usd, 80, 'deal vigente más barato'); assert.equal(d.trafico, 1500); assert.equal(d.mail, 'laura@eleven-agencia.net');
+  assert.equal(ms.find((m: any) => m.dominio === 'viejo.com.ar').precio_usd, null, 'deal vencido no cuenta');
+  const gal = { ...PROYECTOS_INICIALES.find((p: any) => p.code === 'GAL-LIN-1'), active: 1 }, xub = { ...PROYECTOS_INICIALES.find((p: any) => p.code === 'XUB-LIN-2'), active: 1 };
+  assert.equal(aptoMedio(d, gal, [], '2026-11-22').ok, true);
+  assert.match(aptoMedio(d, xub, [], '2026-11-22').motivos[0], /País/);
+  assert.match(aptoMedio(d, gal, [{ project: 'GAL-LIN-1', medio: 'https://diario.com.ar/nota', estado: 'Backlink Publicado', publicado: '2026-10-01', as_code: 'GAL-LIN-1-9' }], '2026-11-22').motivos.join(), /Ya usado/);
+  // planificación: comparte medio entre proyectos y respeta presupuesto
+  const projects = PROYECTOS_INICIALES.filter((p: any) => ['GAL-LIN-1', 'NAV-LIN-5'].includes(p.code)).map((p: any) => ({ ...p, active: 1, params: { ...p.params, presupuestoUSD: 100 } }));
+  const medios = [d, { dominio: 'otro.com.ar', mail: 'x@y', dr: 30, trafico: 5000, pais: 'Argentina', precio_usd: 90 }, { dominio: 'solonav.com.ar', mail: 'z@y', dr: 5, trafico: 400, pais: 'Argentina', precio_usd: 20 }];
+  const pl = planificar({ projects, medios, lb: [], plan: [{ month: '2026-12', project: 'GAL-LIN-1', task_type: 'A - Creación de links', units: 1 }, { month: '2026-12', project: 'NAV-LIN-5', task_type: 'A - Creación de links', units: 2 }], month: '2026-12', hoy: '2026-11-22' });
+  const g = pl.proyectos.find((p: any) => p.code === 'GAL-LIN-1'), n = pl.proyectos.find((p: any) => p.code === 'NAV-LIN-5');
+  assert.equal(g.items[0].dominio, 'diario.com.ar'); assert.deepEqual(g.items[0].tambien, ['NAV-LIN-5']);
+  assert.equal(n.items.length, 2); assert.ok(n.total <= 100, 'dentro del presupuesto ' + n.total);
+  // servidor
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1' })).j.token;
+  assert.equal((await call(env, '/api/medios/import', 'POST', { rows: ms, reset: true, last: true }, tok)).j.n, 3);
+  assert.equal((await call(env, '/api/medios', 'GET', undefined, tok)).j.length, 3);
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.medios_n, 3);
+  assert.equal((await call(env, '/api/medios/import-key', 'POST', { rows: ms })).status, 401);
+});
+
+test('alertas: líder, quietas, impagas e indexación', () => {
+  const hoy = '2026-11-22', viejo = Date.parse('2026-10-01');
+  const lb = [
+    { id: '1', project: 'NAV-LIN-5', as_code: 'NAV-LIN-5-1', usuario: 'Martín Botana', estado: 'Backlink Publicado - REQUIERE ESQUEMA PRECIOS', estado_at: Date.parse(hoy) },
+    { id: '2', project: 'NAV-LIN-5', as_code: 'NAV-LIN-5-2', usuario: 'Martín Botana', estado: 'Backlink Publicado', pago_estado: 'Solicitado', precio: 100, moneda: 'ARS', estado_at: Date.parse(hoy) },
+    { id: '3', project: 'NAV-LIN-5', as_code: 'NAV-LIN-5-3', usuario: 'Martín Botana', estado: 'Backlink Publicado - MANUAL_INDEX', estado_at: Date.parse(hoy) },
+    { id: '4', project: 'GAL-LIN-1', as_code: 'GAL-LIN-1-4', usuario: 'Martín Botana', estado: 'Gestión de Backlink', dr: 10, medio: 'a.com', estado_at: viejo },
+    { id: '5', project: 'GAL-LIN-1', as_code: 'GAL-LIN-1-5', usuario: 'Otra', estado: 'Gestión de Backlink', estado_at: viejo },
+    { id: '6', project: 'NAV-LIN-5', as_code: 'NAV-LIN-5-6', usuario: 'Martín Botana', estado: 'Para Enviar', mail_eleven: 'laura@x', estado_at: Date.parse(hoy) },
+  ];
+  const projects = PROYECTOS_INICIALES.map((p: any) => ({ ...p, active: 1 }));
+  const a = alertas({ lb, red: [], projects }, { hoy, diasQuieta: 14 });
+  assert.deepEqual(a.lider.map((x: any) => x.id).sort(), ['1', '4']);
+  assert.deepEqual(a.impagas.map((x: any) => x.id), ['2']);
+  assert.deepEqual(a.indexacion.map((x: any) => x.id), ['3']);
+  assert.deepEqual(a.quietas.map((x: any) => x.id), ['4'], 'solo las mías');
+  assert.match(a.sugerencias[0].texto, /Enviar 1 link desde laura@x/);
+});
+
+test('Gemini: elige modelos y pide la clave si falta; notas y prompts', async () => {
+  const el = elegirModelos(['gemini-2.5-flash', 'gemini-3.1-pro', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'text-embedding-004', 'gemini-3.1-flash-tts']);
+  assert.equal(el.texto, 'gemini-3.1-pro'); assert.equal(el.imagen, 'gemini-3.1-flash-image');
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1' })).j.token;
+  const id = (await call(env, '/api/lb', 'POST', { project: 'NAV-LIN-5', anchor: 'cobrar con link', estado: 'Gestión de Backlink' }, tok)).j.id;
+  const r = await call(env, '/api/ia/redactar', 'POST', { kind: 'lb', ref: id }, tok);
+  assert.equal(r.status, 400); assert.match(r.j.error, /conectar Gemini/);
+  assert.equal((await call(env, '/api/ia/estado', 'GET', undefined, tok)).j.conectado, false);
+  await call(env, '/api/prompts', 'POST', { project: 'NAV-LIN-5', clave: 'lb', texto: 'Escribí sobre {anchor}' }, tok);
+  await call(env, '/api/notas', 'POST', { texto: 'Preguntar a Lucas por el esquema de precios', lider: true }, tok);
+  const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.prompts[0].texto, 'Escribí sobre {anchor}'); assert.equal(d.notas[0].lider, 1);
+  assert.equal(d.settings.gemini, '');
 });

@@ -1,10 +1,11 @@
 // Proyectos Eleven — app de escritorio (PWA instalable desde Chrome o Edge). Un solo usuario; todo se guarda en el servidor.
-import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain } from './shared.js';
+import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain, compiladoAMedios, aptoMedio, planificar, alertas, QUIEN } from './shared.js';
 
 const S = {
   token: localStorage.getItem('pe_token') || '', setup: false, data: null, view: localStorage.getItem('pe_view') || 'inicio', calurl: '',
-  f: { lbProj: '', lbEstado: 'activas', lbQ: '', lbUser: YO, lbMail: '', lbNeg: '', lbMes: '', lbGroup: '1', redProj: '', redEstado: 'activas', redQ: '', redUser: YO, redGroup: '1', medGroup: 'mail_eleven', medQ: '', mes: hoyEn().slice(0, 7) },
-  sort: { lb: ['deadline', 1], red: ['fecha_entrega', 1] },
+  f: { lbProj: '', lbEstado: 'activas', lbQ: '', lbUser: YO, lbMail: '', lbNeg: '', lbMes: '', lbGroup: '1', redProj: '', redEstado: 'activas', redQ: '', redUser: YO, redGroup: '1', medGroup: 'mail_eleven', medQ: '', mes: hoyEn().slice(0, 7), medTab: 'compilado', mProj: '', mPais: '', mPrecio: '', mDr: '', mMail: '', mQ: '', planMes: addDays(hoyEn().slice(0, 7) + '-28', 7).slice(0, 7), iaProj: '' },
+  sel: { lb: new Set(), red: new Set() }, medios: null, plan: null, pings: 0,
+  sort: { lb: ['deadline', 1], red: ['fecha_entrega', 1], med: ['precio_usd', 1] },
 };
 const $ = (s) => document.querySelector(s);
 const h = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -27,6 +28,10 @@ const IC = {
   appsheet: '<path d="M21 12a9 9 0 0 1-15.5 6.2M3 12a9 9 0 0 1 15.5-6.2"/><path d="M18 2v4h-4M6 22v-4h4"/>',
   ajustes: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  plan: '<path d="M8 2v4M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18M8 14h3M8 18h6"/>',
+  alertas: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  ia: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  img: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>', doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>',
   play: '<path d="M7 4v16l13-8z"/>', stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>', copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
 };
 const ic = (k) => `<svg class="i" viewBox="0 0 24 24">${IC[k]}</svg>`;
@@ -59,13 +64,13 @@ const redBadge = (e) => `<span class="badge b${e === 'Cerrado' ? 7 : /^Para CMS/
 function dlTag(d, done) { if (!d) return '<span class="mute">—</span>'; const t = hoy(); if (done) return `<span class="mute">${fmtD(d)}</span>`; return d < t ? `<span class="tag bad">${fmtD(d)}</span>` : d === t ? `<span class="tag warn">Hoy</span>` : d <= addDays(t, 2) ? `<span class="tag warn">${fmtD(d)}</span>` : fmtD(d); }
 
 // ---------- marco ----------
-const VIEWS = [['inicio', 'Inicio'], ['lb', 'Links'], ['red', 'Redacciones'], ['medios', 'Medios y contactos'], ['horas', 'Horas'], ['proyectos', 'Proyectos'], ['sep'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
+const VIEWS = [['inicio', 'Inicio'], ['alertas', 'Notas y alertas'], ['lb', 'Links'], ['red', 'Redacciones'], ['medios', 'Medios'], ['plan', 'Planificación'], ['horas', 'Horas'], ['sep'], ['proyectos', 'Proyectos'], ['ia', 'IA y prompts'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
 function render() {
   if (!S.token) return renderLogin();
   if (!S.data) { $('#app').innerHTML = '<div class="login"><div class="mute">Cargando…</div></div>'; return; }
   if (!$('#shell')) $('#app').innerHTML = `<div id="shell"><aside id="side"><div class="brand"><img src="/icon.svg" alt=""><div><b>Proyectos Eleven</b><small>Link building · Contenido</small></div></div><nav id="nav"></nav><div id="sidetimer"></div></aside><section id="main"><header id="head"></header><div id="view"></div></section></div>`;
-  const counts = { lb: S.data.lb.filter((t) => t.usuario === YO && !esCerradoLB(t.estado)).length, red: S.data.red.filter((r) => r.usuario === YO && !esCerradoRED(r.estado)).length, appsheet: S.data.as_pend.length };
-  $('#nav').innerHTML = VIEWS.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</button>`)).join('');
+  const al = misAlertas(), counts = { lb: S.data.lb.filter((t) => t.usuario === YO && !esCerradoLB(t.estado)).length, red: S.data.red.filter((r) => r.usuario === YO && !esCerradoRED(r.estado)).length, appsheet: S.data.as_pend.length, alertas: al.lider.length + al.impagas.length + al.indexacion.length };
+  $('#nav').innerHTML = VIEWS.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count${k === 'alertas' ? ' hotc' : ''}">${counts[k]}</span>` : ''}</button>`)).join('');
   const v = VIEWS_FN[S.view] || VIEWS_FN.inicio, out = v();
   $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}</div>`;
   const keep = $('#view').scrollTop; $('#view').innerHTML = out.body; $('#view').scrollTop = keep;
@@ -105,7 +110,8 @@ VIEWS_FN.inicio = () => {
       <div class="kpi"><div class="k">Horas del mes</div><div class="v">${fmtN(rm)} <span class="mute" style="font-size:14px;font-weight:500">/ ${fmtN(pm)}</span></div><div class="d">${pm ? Math.round((rm / pm) * 100) : 0}% del plan de ${MESES[Number(mes.slice(5)) - 1]}</div></div>
       <div class="kpi ${venc.length ? 'hot' : ''}"><div class="k">Vencidas</div><div class="v">${venc.length}</div><div class="d">${prox.length - venc.length} en los próximos 7 días</div></div>
       <div class="kpi ${rebotes.length ? 'hot' : ''}"><div class="k">Tareas que rebotarían</div><div class="v">${rebotes.length}</div><div class="d">Según parámetros del proyecto</div></div>
-      <div class="kpi"><div class="k">Pendientes AppSheet</div><div class="v">${S.data.as_pend.length}</div><div class="d">Cambios sin reflejar</div></div></div>
+      <div class="kpi"><div class="k">Pendientes AppSheet</div><div class="v">${S.data.as_pend.length}</div><div class="d">Cambios sin reflejar</div></div>
+      <div class="kpi ${misAlertas().lider.length ? 'hot' : ''}" data-act="view" data-v="alertas" style="cursor:pointer"><div class="k">Hablar con el líder</div><div class="v">${misAlertas().lider.length}</div><div class="d">${misAlertas().impagas.length} sin pagar · ${misAlertas().indexacion.length} indexación</div></div></div>
     <div class="cols c21"><div class="card"><div class="ch"><h2>Próximos vencimientos</h2><span class="sub">Vencidas y próximos 7 días</span></div>
       ${prox.length ? `<table class="tbl"><thead><tr><th>Vence</th><th>Tipo</th><th>Proyecto</th><th>Tarea</th><th>Estado</th></tr></thead><tbody>${prox.map((x) => `<tr data-open="${x.kind}" data-id="${x.id}"><td>${dlTag(x.d)}</td><td class="mute">${x.tipo}</td><td class="mono">${h(x.project)}</td><td>${h(x.title)}${x.code ? ` <span class="mute mono">${h(x.code)}</span>` : ''}</td><td>${x.estado}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Sin vencimientos en los próximos 7 días.</div>'}</div>
       <div class="card"><div class="ch"><h2>Tareas que rebotarían en AppSheet</h2></div>
@@ -140,6 +146,17 @@ function agrupar(arr, cols, rowFn, group) {
   }
   return out;
 }
+// ---------- selección y cambio de estado en lote ----------
+const selTd = (k, id) => `<td class="ck"><input type="checkbox" class="selck" data-k="${k}" data-id="${h(id)}" ${S.sel[k].has(id) ? 'checked' : ''}></td>`;
+const selAllTh = (k, arr) => { const all = arr.length && arr.every((x) => S.sel[k].has(x.id)); S.visibles = { ...(S.visibles || {}), [k]: arr.map((x) => x.id) }; return `<th class="ck"><input type="checkbox" class="selall" data-k="${k}" title="Seleccionar las ${arr.length} visibles" ${all ? 'checked' : ''}></th>`; };
+function bulkBar(k, arr) {
+  const n = S.sel[k].size; if (!n) return '';
+  const lista = k === 'lb' ? ESTADOS_LB : ESTADOS_RED, selec = S.data[k].filter((x) => S.sel[k].has(x.id)), est = [...new Set(selec.map((x) => x.estado))];
+  return `<div class="bulk"><b>${n} seleccionada${n > 1 ? 's' : ''}</b><span class="mute small">${h(est.slice(0, 3).join(' · '))}${est.length > 3 ? '…' : ''} · ${h([...new Set(selec.map((x) => x.project))].join(', '))}</span>
+    <span style="margin-left:auto" class="small">Pasar a</span><select id="bulkest">${opts(lista, k === 'lb' ? PASOS_LB[est[0]]?.sigue || '' : PASOS_RED[est[0]]?.sigue || '')}</select>
+    <button class="btn sm" data-act="bulkgo" data-k="${k}">Aplicar</button><button class="btn sm sec" data-act="bulkclear" data-k="${k}">Limpiar</button></div>`;
+}
+
 VIEWS_FN.lb = () => {
   const f = S.f, q = f.lbQ.trim().toLowerCase();
   let arr = S.data.lb.filter((t) => (!f.lbProj || t.project === f.lbProj) && (!f.lbUser || t.usuario === f.lbUser) && (!f.lbMail || t.mail_eleven === f.lbMail) && (!f.lbNeg || t.estado_neg === f.lbNeg) && (!f.lbMes || (t.deadline || '').startsWith(f.lbMes))
@@ -162,13 +179,13 @@ VIEWS_FN.lb = () => {
       <select data-f="lbMes"><option value="">Todos los meses</option>${opts(meses, f.lbMes, meses.map((m) => mesLargo(m)))}</select>
       ${searchBox('lbQ', 'Buscar anchor, medio, mail, código…')}
       <label class="check" style="margin-left:auto"><input type="checkbox" data-f="lbGroup" ${f.lbGroup === '1' ? 'checked' : ''}> Agrupar por proyecto</label></div>
-    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('lb', 'as_code', 'Código')}${th('lb', 'anchor', 'Anchor')}${th('lb', 'medio', 'Medio')}${th('lb', 'mail_eleven', 'Mail de contacto')}${th('lb', 'estado_neg', 'Negociación')}${th('lb', 'precio', 'Precio', 'num')}${th('lb', 'deadline', 'Mes plan.')}${f.lbUser ? '' : th('lb', 'usuario', 'Asignado')}${th('lb', 'estado', 'Estado')}</tr></thead><tbody>
-      ${agrupar(arr, f.lbUser ? 8 : 9, (x) => { const av = PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb);
-        return `<tr data-open="lb" data-id="${x.id}"><td class="mono">${x.as_code ? h(x.as_code) : `<span class="tag acc">Nueva · ${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${textoTag('lb', x.id)}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
+    ${bulkBar('lb', arr)}<div class="card tblwrap"><table class="tbl"><thead><tr>${selAllTh('lb', arr)}${th('lb', 'as_code', 'Código')}${th('lb', 'anchor', 'Anchor')}${th('lb', 'medio', 'Medio')}${th('lb', 'mail_eleven', 'Mail de contacto')}${th('lb', 'estado_neg', 'Negociación')}${th('lb', 'precio', 'Precio', 'num')}${th('lb', 'deadline', 'Mes plan.')}${f.lbUser ? '' : th('lb', 'usuario', 'Asignado')}${th('lb', 'estado', 'Estado')}</tr></thead><tbody>
+      ${agrupar(arr, f.lbUser ? 9 : 10, (x) => { const av = PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb);
+        return `<tr data-open="lb" data-id="${x.id}" class="${S.sel.lb.has(x.id) ? 'selrow' : ''}">${selTd('lb', x.id)}<td class="mono">${x.as_code ? h(x.as_code) : `<span class="tag acc">Nueva · ${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${textoTag('lb', x.id)}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
           <td title="${h(x.medio)}">${h(normDomain(x.medio))}</td><td title="${h(x.mail_eleven)}">${h(x.mail_eleven)}</td><td>${h(x.estado_neg)}</td><td class="num nowrap">${x.precio !== null && x.precio !== undefined ? `${h(x.moneda)} ${fmtN(x.precio)}` : ''}</td>
           <td class="nowrap">${PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? `<span class="mute">${fmtMes(x.deadline)}</span>` : x.deadline && x.deadline < hoy() ? `<span class="tag bad">${fmtMes(x.deadline)}</span>` : fmtMes(x.deadline)}</td>
           ${f.lbUser ? '' : `<td class="nowrap ${x.usuario === YO ? '' : 'mute'}">${h(x.usuario)}</td>`}
-          <td><select data-act="lbestado" data-id="${x.id}" title="${h(pasoTitle(PASOS_LB, x.estado))}">${estadoOpts(ESTADOS_LB, x.estado)}</select></td></tr>`; }, f.lbGroup) || '<tr><td colspan="9" class="empty">No hay tareas con estos filtros.</td></tr>'}</tbody></table></div>`,
+          <td><select data-act="lbestado" data-id="${x.id}" title="${h(pasoTitle(PASOS_LB, x.estado))}">${estadoOpts(ESTADOS_LB, x.estado)}</select></td></tr>`; }, f.lbGroup) || '<tr><td colspan="10" class="empty">No hay tareas con estos filtros.</td></tr>'}</tbody></table></div>`,
   };
 };
 function lbForm(x = {}) {
@@ -223,11 +240,11 @@ VIEWS_FN.red = () => {
       <select data-f="redEstado">${opts(['activas', 'todas', ...estados], f.redEstado, ['Activas (sin cerradas)', 'Todas', ...estados])}</select>
       <select data-f="redUser"><option value="">Todos los asignados</option>${opts(usuarios(S.data.red), f.redUser, usuarios(S.data.red).map((u) => (u === YO ? `${u} (yo)` : u)))}</select>
       ${searchBox('redQ', 'Buscar tema o código…')}<label class="check" style="margin-left:auto"><input type="checkbox" data-f="redGroup" ${f.redGroup === '1' ? 'checked' : ''}> Agrupar por proyecto</label></div>
-    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('red', 'as_code', 'Código')}${th('red', 'tema', 'Tema')}${th('red', 'subproyecto', 'Subproyecto')}${th('red', 'prioridad', 'Prioridad')}${th('red', 'fecha_entrega', 'Deadline')}${th('red', 'entregada', 'Entregada')}${f.redUser ? '' : th('red', 'usuario', 'Asignado')}${th('red', 'estado', 'Estado')}</tr></thead><tbody>
-      ${agrupar(arr, f.redUser ? 7 : 8, (r) => `<tr data-open="red" data-id="${r.id}"><td class="mono">${r.as_code ? h(r.as_code) : `<span class="tag acc">${pendAS.has(r.id) ? 'Por cargar' : 'Nueva'}</span>`}</td><td title="${h(r.tema)}" style="max-width:340px">${h(r.tema)}${textoTag('red', r.id)}</td><td>${h([r.subproyecto, r.variante].filter(Boolean).join(' · '))}</td>
+    ${bulkBar('red', arr)}<div class="card tblwrap"><table class="tbl"><thead><tr>${selAllTh('red', arr)}${th('red', 'as_code', 'Código')}${th('red', 'tema', 'Tema')}${th('red', 'subproyecto', 'Subproyecto')}${th('red', 'prioridad', 'Prioridad')}${th('red', 'fecha_entrega', 'Deadline')}${th('red', 'entregada', 'Entregada')}${f.redUser ? '' : th('red', 'usuario', 'Asignado')}${th('red', 'estado', 'Estado')}</tr></thead><tbody>
+      ${agrupar(arr, f.redUser ? 8 : 9, (r) => `<tr data-open="red" data-id="${r.id}" class="${S.sel.red.has(r.id) ? 'selrow' : ''}">${selTd('red', r.id)}<td class="mono">${r.as_code ? h(r.as_code) : `<span class="tag acc">${pendAS.has(r.id) ? 'Por cargar' : 'Nueva'}</span>`}</td><td title="${h(r.tema)}" style="max-width:340px">${h(r.tema)}${textoTag('red', r.id)}</td><td>${h([r.subproyecto, r.variante].filter(Boolean).join(' · '))}</td>
         <td>${r.prioridad === 'Alta' || r.prioridad === 'Urgente' ? `<span class="tag bad">${h(r.prioridad)}</span>` : r.prioridad === 'Baja' ? '<span class="tag">Baja</span>' : h(r.prioridad)}</td>
         <td>${dlTag(r.fecha_entrega, esCerradoRED(r.estado) || !!r.entregada)}</td><td class="mute">${fmtD(r.entregada)}</td>${f.redUser ? '' : `<td class="nowrap ${r.usuario === YO ? '' : 'mute'}">${h(r.usuario)}</td>`}
-        <td><select data-act="redestado" data-id="${r.id}" title="${h(pasoTitle(PASOS_RED, r.estado))}">${estadoOpts(ESTADOS_RED, r.estado)}</select></td></tr>`, f.redGroup) || '<tr><td colspan="8" class="empty">No hay redacciones con estos filtros.</td></tr>'}</tbody></table></div>`,
+        <td><select data-act="redestado" data-id="${r.id}" title="${h(pasoTitle(PASOS_RED, r.estado))}">${estadoOpts(ESTADOS_RED, r.estado)}</select></td></tr>`, f.redGroup) || '<tr><td colspan="9" class="empty">No hay redacciones con estos filtros.</td></tr>'}</tbody></table></div>`,
   };
 };
 function redForm(r = {}) {
@@ -253,7 +270,7 @@ function redForm(r = {}) {
 }
 
 // ---------- Medios y contactos ----------
-VIEWS_FN.medios = () => {
+function misContactos() {
   const f = S.f, q = f.medQ.trim().toLowerCase(), key = { mail_eleven: (t) => t.mail_eleven, contacto_medio: (t) => t.contacto_medio, medio: (t) => normDomain(t.medio) }[f.medGroup];
   const groups = new Map();
   for (const t of S.data.lb) {
@@ -263,7 +280,7 @@ VIEWS_FN.medios = () => {
   const keys = [...groups.keys()].sort((a, b) => (a === '(sin dato)') - (b === '(sin dato)') || a.localeCompare(b));
   const nMedios = new Set(S.data.lb.map((t) => normDomain(t.medio)).filter(Boolean)).size;
   return {
-    title: 'Medios y contactos', sub: `${nMedios} medios · ${keys.length} grupos`,
+    sub: `${nMedios} medios en tus tareas · ${keys.length} grupos`,
     body: `<div class="toolbar"><select data-f="medGroup">${opts(['mail_eleven', 'contacto_medio', 'medio'], f.medGroup, ['Agrupar por mail desde el que contacté', 'Agrupar por contacto del medio', 'Agrupar por medio'])}</select>${searchBox('medQ', 'Buscar mail, medio, anchor…')}</div>
     <div class="card tblwrap"><table class="tbl"><thead><tr><th>Medio</th><th>Proyecto</th><th>Código</th><th>Anchor</th>${f.medGroup !== 'mail_eleven' ? '<th>Contacté desde</th>' : ''}${f.medGroup !== 'contacto_medio' ? '<th>Contacto del medio</th>' : ''}<th>Negociación</th><th class="num">Precio</th><th>Estado</th></tr></thead><tbody>
     ${keys.map((k) => { const arr = groups.get(k), ps = [...new Set(arr.map((t) => t.project))];
@@ -291,7 +308,7 @@ VIEWS_FN.horas = () => {
     body: `<div class="card"><table class="tbl"><thead><tr><th>Proyecto</th><th>Tarea</th><th class="num">Plan (h)</th><th class="num">Real (h)</th><th></th><th class="num">Avance</th><th class="num">Unidades hechas / plan</th></tr></thead><tbody>${body || '<tr><td colspan="7" class="empty">Sin plan ni horas en este mes.</td></tr>'}</tbody></table></div>
     <p class="small mute">Unidades hechas: links que pasaron a Publicado o Cerrado y redacciones Entregadas dentro del mes.</p>
     <div class="card" style="margin-top:20px"><div class="ch"><h2>Registro</h2><span class="sub">${hrs.length} carga${hrs.length === 1 ? '' : 's'}</span></div><table class="tbl"><thead><tr><th>Fecha</th><th>Proyecto</th><th>Tarea</th><th>Nota</th><th class="num">Horas</th></tr></thead><tbody>
-      ${hrs.map((x) => `<tr data-open="hours" data-id="${x.id}"><td>${fmtD(x.date)}</td><td class="mono">${h(x.project)}</td><td>${h(x.task_type)}</td><td class="mute">${h(x.note)}</td><td class="num">${fmtN(x.hours)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin horas cargadas.</td></tr>'}</tbody></table></div>`,
+      ${hrs.map((x) => `<tr ${x.auto ? '' : `data-open="hours" data-id="${x.id}"`}><td>${fmtD(x.date)}</td><td class="mono">${h(x.project)}</td><td>${h(x.task_type)}</td><td class="mute">${x.auto ? '<span class="tag acc">auto</span> ' : ''}${h(x.note)}</td><td class="num">${fmtN(x.hours)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin horas cargadas.</td></tr>'}</tbody></table></div>`,
   };
 };
 function hoursForm(x = {}) {
@@ -315,9 +332,9 @@ function planForm() {
 VIEWS_FN.proyectos = () => ({
   title: 'Proyectos', sub: 'Proyectos habilitados en AppSheet y los topes que valida cada uno',
   actions: `<button class="btn" data-act="saveproj">Guardar cambios</button>`,
-  body: `<form id="projf"><div class="card"><table class="tbl"><thead><tr><th>Activo</th><th>Proyecto</th><th>Cliente</th><th>Dominio</th><th>Países</th><th class="num">DR mín.</th><th class="num">Tráfico mín.</th><th class="num">USD máx.</th><th class="num">Repetir (días)</th><th class="num">Palabras</th></tr></thead><tbody>
+  body: `<form id="projf"><div class="card"><table class="tbl"><thead><tr><th>Activo</th><th>Proyecto</th><th>Cliente</th><th>Dominio</th><th>Países</th><th class="num">DR mín.</th><th class="num">Tráfico mín.</th><th class="num">USD máx.</th><th class="num">Repetir (días)</th><th class="num">Palabras</th><th class="num">Presupuesto USD/mes</th></tr></thead><tbody>
     ${S.data.projects.map((p) => `<tr data-code="${h(p.code)}"><td><input type="checkbox" name="active" ${p.active ? 'checked' : ''}></td><td class="mono">${h(p.code)}</td><td><input name="cliente" value="${h(p.cliente)}" style="width:120px;height:30px"></td>
-      ${p.tipo === 'LIN' ? `<td><input name="dominio" value="${h(p.params.dominio)}" style="width:150px;height:30px"></td><td><input name="paises" value="${h(p.params.paises)}" style="width:130px;height:30px"></td>${['drMin', 'trafMin', 'precioMaxUSD', 'repDias', 'palabrasMin'].map((k) => `<td class="num"><input type="number" step="any" name="${k}" value="${h(p.params[k] ?? '')}" style="width:66px;height:30px;text-align:right"></td>`).join('')}<input type="hidden" name="servicio" value="${h(p.params.servicio)}">` : '<td colspan="7" class="mute">Proyecto de redacción</td>'}</tr>`).join('')}
+      ${p.tipo === 'LIN' ? `<td><input name="dominio" value="${h(p.params.dominio)}" style="width:150px;height:30px"></td><td><input name="paises" value="${h(p.params.paises)}" style="width:130px;height:30px"></td>${['drMin', 'trafMin', 'precioMaxUSD', 'repDias', 'palabrasMin', 'presupuestoUSD'].map((k) => `<td class="num"><input type="number" step="any" name="${k}" value="${h(p.params[k] ?? '')}" style="width:66px;height:30px;text-align:right"></td>`).join('')}<input type="hidden" name="servicio" value="${h(p.params.servicio)}">` : '<td colspan="8" class="mute">Proyecto de redacción</td>'}</tr>`).join('')}
     </tbody></table></div></form><p class="small mute">Valores tomados de "Parámetros del Proyecto" en AppSheet el 20/11/2026. Un campo vacío no se controla.</p>`,
 });
 
@@ -354,35 +371,254 @@ VIEWS_FN.ajustes = () => {
   };
 };
 
-// ---------- cronómetro (guardado en el servidor) ----------
-const timer = () => { try { return JSON.parse(S.data.settings.timer || 'null'); } catch { return null; } };
-function renderTimer() {
-  const el = $('#sidetimer'); if (!el) return; const tm = timer(), ps = projs();
-  el.innerHTML = tm ? `<div class="lbl"><span class="run"></span>Cronómetro</div><div class="small"><b class="mono">${h(tm.project)}</b></div><div class="small mute">${h(tm.task_type)}</div><div class="clock" id="tclock">0:00:00</div>
-      <div style="display:flex;gap:6px"><button class="btn sm" data-act="tstop" style="flex:1;justify-content:center">${ic('stop')}Guardar</button><button class="btn sm sec" data-act="tdiscard">Descartar</button></div>`
-    : `<div class="lbl">Cronómetro</div><select id="tproj" data-act="tproj" style="height:30px;font-size:12.5px">${opts(ps.map((p) => p.code), S.tproj || ps[0]?.code)}</select>
-      <select id="ttype" style="height:30px;font-size:12.5px">${opts(TAREAS[proj(S.tproj || ps[0]?.code)?.tipo || 'LIN'], S.ttype)}</select><button class="btn sm full" data-act="tstart">${ic('play')}Iniciar</button>`;
-  clearInterval(renderTimer.i); if (!tm) return;
-  const up = () => { const c = $('#tclock'); if (!c) return; const s = Math.max(0, Math.floor((Date.now() - tm.start) / 1000)); c.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; document.title = `${c.textContent} · ${tm.project}`; };
-  up(); renderTimer.i = setInterval(up, 1000);
+// ---------- Medios: compilado + mis contactos ----------
+async function cargarMedios(force) { if (S.medios && !force) return S.medios; S.medios = await api('/api/medios'); return S.medios; }
+const tabs = (f, items) => `<div class="tabs">${items.map(([k, t]) => `<button class="${S.f[f] === k ? 'on' : ''}" data-act="tab" data-f="${f}" data-v="${k}">${t}</button>`).join('')}</div>`;
+VIEWS_FN.medios = () => {
+  const head = tabs('medTab', [['compilado', `Compilado de Eleven${S.data.medios_n ? ` (${fmtN(S.data.medios_n, 0)})` : ''}`], ['contactos', 'Mis medios y contactos']]);
+  if (S.f.medTab === 'contactos') { const c = misContactos(); return { title: 'Medios', sub: c.sub, body: head + c.body }; }
+  const at = S.data.settings.medios_at ? `Actualizado el ${new Date(Number(S.data.settings.medios_at)).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}` : 'Todavía sin importar';
+  const actions = `<label class="btn sec" style="cursor:pointer">${ic('plus')}Importar compilado (CSV)<input type="file" accept=".csv,text/csv" id="medcsv" hidden></label>`;
+  if (!S.medios) { if (S.data.medios_n) cargarMedios().then(render).catch((e) => toast(e.message)); return { title: 'Medios', sub: at, actions, body: head + `<div class="card"><div class="empty">${S.data.medios_n ? 'Cargando medios…' : 'Importá el compilado: en la planilla <b>finance_01_report_Production</b>, Archivo → Descargar → CSV, y subilo con el botón de arriba.'}</div></div>` }; }
+  const f = S.f, q = f.mQ.trim().toLowerCase(), lin = projs('LIN'), hoyS = hoy();
+  const apt = new Map(S.medios.map((m) => [m.dominio, lin.filter((p) => aptoMedio(m, p, S.data.lb, hoyS).ok).map((p) => p.code)]));
+  let arr = S.medios.filter((m) => (!f.mProj || apt.get(m.dominio).includes(f.mProj)) && (!f.mPais || m.pais === f.mPais) && (!f.mPrecio || (f.mPrecio === 'con' ? m.precio_usd !== null : m.precio_usd === null)) && (!f.mDr || (m.dr || 0) >= Number(f.mDr)) && (!f.mMail || m.mail === f.mMail) && (!q || (m.dominio + ' ' + m.mail + ' ' + m.proveedor).toLowerCase().includes(q)));
+  sortBy(arr, 'med', { dr: (m) => m.dr ?? -1, trafico: (m) => m.trafico ?? -1, precio_usd: (m) => m.precio_usd ?? 1e9, aptos: (m) => apt.get(m.dominio).length });
+  const paises = [...new Set(S.medios.map((m) => m.pais).filter(Boolean))].sort(), mails = [...new Set(S.medios.map((m) => m.mail).filter(Boolean))].sort();
+  const MAX = 400, vis = arr.slice(0, MAX);
+  return {
+    title: 'Medios', sub: `${fmtN(arr.length, 0)} de ${fmtN(S.medios.length, 0)} medios en español · ${at}`, actions,
+    body: head + `<div class="toolbar wrap"><select data-f="mProj"><option value="">Apto para cualquier proyecto o ninguno</option>${opts(lin.map((p) => p.code), f.mProj, lin.map((p) => `Apto para ${p.code} · ${p.cliente}`))}</select>
+      <select data-f="mPais"><option value="">Todos los países</option>${opts(paises, f.mPais)}</select>
+      <select data-f="mPrecio">${opts(['', 'con', 'sin'], f.mPrecio, ['Con y sin precio', 'Con precio (deal vigente)', 'Sin precio (a negociar)'])}</select>
+      <input type="number" data-f="mDr" placeholder="DR mín." value="${h(f.mDr)}" style="width:90px">
+      <select data-f="mMail"><option value="">Todos los mails de contacto</option>${opts(mails, f.mMail)}</select>${searchBox('mQ', 'Buscar dominio, mail o proveedor…')}</div>
+    <div class="card tblwrap"><table class="tbl"><thead><tr>${th('med', 'dominio', 'Dominio')}${th('med', 'mail', 'Mail de contacto')}${th('med', 'dr', 'DR', 'num')}${th('med', 'trafico', 'Tráfico', 'num')}${th('med', 'precio_usd', 'Precio', 'num')}${th('med', 'pais', 'País')}${th('med', 'estado', 'Estado')}${th('med', 'aptos', 'Apto para')}</tr></thead><tbody>
+      ${vis.map((m) => { const a = apt.get(m.dominio); return `<tr><td><a href="https://${h(m.dominio)}" target="_blank" rel="noopener">${h(m.dominio)}</a>${m.sensible ? ' <span class="tag" title="Admite temática sensible">sensible</span>' : ''}</td><td>${m.mail ? `${h(m.mail)} <button class="lnk small" data-act="copy" data-v="${h(m.mail)}">copiar</button>` : '<span class="mute">—</span>'}</td>
+        <td class="num">${fmtN(m.dr, 0)}</td><td class="num">${fmtN(m.trafico, 0)}</td><td class="num nowrap" title="${h(m.proveedor)}${m.vence ? ' · vence ' + fmtD(m.vence) : ''}">${m.precio_usd !== null ? `USD ${fmtN(m.precio_usd)}${m.moneda && m.moneda !== 'USD' ? ` <span class="mute small">(${h(m.moneda)} ${fmtN(m.precio, 0)})</span>` : ''}` : '<span class="mute">—</span>'}</td>
+        <td>${h(m.pais)}</td><td class="mute">${h(m.estado)}</td><td class="wrap" style="min-width:170px">${a.length ? a.map((c) => `<span class="tag ok mono">${h(c.replace(/-LIN-/, '·'))}</span>`).join(' ') : `<span class="mute small" title="${h(lin.map((p) => `${p.code}: ${aptoMedio(m, p, S.data.lb, hoyS).motivos.join(', ')}`).join('\n'))}">ninguno</span>`}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">Ningún medio con estos filtros.</td></tr>'}
+    </tbody></table></div>${arr.length > MAX ? `<p class="small mute">Se muestran los primeros ${MAX}. Usá los filtros para acotar.</p>` : ''}
+    <p class="small mute">Apto = cumple DR, tráfico, país y precio máximo del proyecto y no está usado en otra tarea del proyecto dentro de los días de espera. Pasá el mouse por "ninguno" para ver por qué.</p>`,
+  };
+};
+async function importarCompilado(file) {
+  const txt = await file.text(); let ms;
+  try { ms = compiladoAMedios(txt); } catch (e) { return toast(e.message); }
+  toast(`Importando ${ms.length} medios…`);
+  for (let i = 0; i < ms.length; i += 800) await api('/api/medios/import', 'POST', { rows: ms.slice(i, i + 800), reset: i === 0, last: i + 800 >= ms.length });
+  S.medios = null; await load(); toast(`${fmtN(ms.length, 0)} medios importados`);
 }
-async function setTimer(v) { await api('/api/settings', 'POST', { timer: v ? JSON.stringify(v) : '' }); S.data.settings.timer = v ? JSON.stringify(v) : ''; if (!v) document.title = 'Proyectos Eleven'; }
+
+// ---------- Planificación del mes ----------
+VIEWS_FN.plan = () => {
+  const mes = S.f.planMes, pl = S.plan && S.plan.month === mes ? S.plan : null, lin = projs('LIN');
+  if (S.plan === null || (S.plan && S.plan.month !== mes)) { S.plan = { month: mes, cargando: true }; api('/api/planes?month=' + mes).then((r) => { S.plan = r || { month: mes, vacio: true }; render(); }).catch(() => {}); }
+  const unidades = (c) => S.data.plan.filter((r) => r.month === mes && r.project === c && /^A /.test(r.task_type)).reduce((a, r) => a + r.units, 0);
+  const d = pl && pl.data, estado = pl?.estado;
+  const badge = { borrador: '<span class="tag">Borrador</span>', pedida: '<span class="tag warn">Esperando validación de Claude</span>', validada: '<span class="tag ok">Validada por Claude</span>' }[estado] || '';
+  let res = '';
+  if (d && d.proyectos) {
+    const porMail = {};
+    for (const p of d.proyectos) for (const it of p.items) (porMail[it.mail || '(sin mail)'] ||= []).push({ ...it, code: p.code });
+    const sinFalta = d.proyectos.filter((p) => !p.falta && !p.items.length);
+    res = `${sinFalta.length ? `<p class="small mute" style="margin-top:0">Sin links pendientes en ${mesLargo(mes)}: ${sinFalta.map((p) => p.code).join(', ')}</p>` : ''}<div class="cols c11" style="margin-top:0">${d.proyectos.filter((p) => p.falta || p.items.length).map((p) => `<div class="card"><div class="ch"><h2 class="mono">${h(p.code)}</h2><span class="sub">${h(p.cliente)} · ${p.items.length} de ${p.falta} links · ${p.presupuesto !== null ? `USD ${fmtN(p.total)} de ${fmtN(p.disponible)} disponibles` : `USD ${fmtN(p.total)} (sin presupuesto cargado)`}</span></div>
+      ${p.items.length ? `<div class="tblwrap"><table class="tbl"><thead><tr><th>Medio</th><th>Mail de contacto</th><th class="num">DR</th><th class="num">Tráfico</th><th class="num">USD</th><th>También en</th></tr></thead><tbody>${p.items.map((it) => `<tr><td>${h(it.dominio)}</td><td class="small">${h(it.mail)}</td><td class="num">${fmtN(it.dr, 0)}</td><td class="num">${fmtN(it.trafico, 0)}</td><td class="num">${fmtN(it.precio_usd)}</td><td class="nowrap">${it.tambien.map((c) => `<span class="tag acc mono">${h(c.replace('-LIN-', '·'))}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty">${p.falta ? 'No hay medios con precio que entren en el presupuesto.' : 'Sin links pendientes este mes.'}</div>`}
+      ${p.alternativas.length && p.items.length < p.falta ? `<div class="cb small"><b>Para negociar (sin precio):</b> ${p.alternativas.slice(0, 8).map((m) => `${h(m.dominio)} <span class="mute">(DR ${fmtN(m.dr, 0)} · ${h(m.mail || 'sin mail')})</span>`).join(' · ')}</div>` : ''}</div>`).join('')}</div>
+      <div class="card" style="margin-top:20px"><div class="ch"><h2>Por mail de contacto</h2><span class="sub">Para escribir una vez a cada medio aunque sea para varios proyectos</span></div><table class="tbl"><tbody>
+      ${Object.entries(porMail).sort((a, b) => b[1].length - a[1].length).map(([mail, arr]) => `<tr class="grp"><td colspan="4">${h(mail)} <span class="mute" style="font-weight:400">· ${arr.length} link${arr.length > 1 ? 's' : ''}</span></td></tr>${arr.map((it) => `<tr><td>${h(it.dominio)}</td><td class="mono">${h(it.code)}</td><td class="num">USD ${fmtN(it.precio_usd)}</td><td class="mute small">DR ${fmtN(it.dr, 0)} · ${fmtN(it.trafico, 0)} visitas</td></tr>`).join('')}`).join('')}</tbody></table></div>`;
+  }
+  return {
+    title: 'Planificación', sub: `Links de ${mesLargo(mes)} según presupuesto y compilado de medios ${badge}`,
+    actions: `<input type="month" data-f="planMes" value="${h(mes)}" style="width:auto"><button class="btn sec" data-act="planarmar">${ic('plan')}${d ? 'Volver a armar' : 'Armar planificación'}</button>${d ? `<button class="btn" data-act="planvalidar" ${estado === 'pedida' ? 'disabled' : ''}>Validar con Claude</button>` : ''}`,
+    body: `<div class="card"><div class="ch"><h2>Presupuesto y cupo de ${mesLargo(mes)}</h2><span class="sub">Links: plan de unidades "A - Creación de links" del mes</span></div><table class="tbl"><thead><tr><th>Proyecto</th><th>Cliente</th><th class="num">Links del plan</th><th class="num">Ya planificados</th><th class="num">Presupuesto mensual (USD)</th><th class="num">USD máx. por link</th></tr></thead><tbody>
+      ${lin.map((p) => `<tr><td class="mono">${h(p.code)}</td><td>${h(p.cliente)}</td><td class="num">${unidades(p.code)}</td><td class="num">${S.data.lb.filter((t) => t.project === p.code && t.estado !== 'Anulado' && (t.deadline || '').startsWith(mes)).length}</td><td class="num"><input type="number" step="1" min="0" class="presu" data-code="${h(p.code)}" value="${h(p.params.presupuestoUSD ?? '')}" style="width:100px;height:30px;text-align:right"></td><td class="num mute">${p.params.precioMaxUSD ?? '—'}</td></tr>`).join('')}</tbody></table>
+      <div class="cb small mute" style="display:flex;gap:12px;align-items:center">Editá las unidades en Horas → Editar plan del mes. <button class="btn sm sec" data-act="presusave" style="margin-left:auto">Guardar presupuestos</button></div></div>
+    ${estado === 'pedida' ? `<div class="alert" style="margin:16px 0"><b>Pedido de validación guardado.</b> Abrí Claude con <b>Opus · esfuerzo alto</b> y escribí: <code>Validá la planificación de ${h(mes)} de Proyectos Eleven</code>. Claude la revisa contra AppSheet y el compilado y deja acá sus notas.</div>` : ''}
+    ${pl?.validacion ? `<div class="card" style="margin:16px 0"><div class="ch"><h2>Notas de Claude</h2></div><div class="cb" style="white-space:pre-wrap">${h(pl.validacion)}</div></div>` : ''}
+    <div style="margin-top:20px">${res || (pl?.cargando ? '<div class="empty">Cargando…</div>' : '<div class="card"><div class="empty">Cargá los presupuestos y tocá <b>Armar planificación</b>. No se arma sola.</div></div>')}</div>`,
+  };
+};
+async function armarPlan() {
+  const mes = S.f.planMes;
+  if (!S.data.medios_n) return toast('Primero importá el compilado de medios');
+  await cargarMedios();
+  const data = planificar({ projects: S.data.projects, medios: S.medios, lb: S.data.lb, plan: S.data.plan, month: mes });
+  await api('/api/planes', 'POST', { month: mes, estado: 'borrador', data });
+  S.plan = null; render(); toast('Planificación armada (borrador)');
+}
+
+// ---------- Notas y alertas ----------
+function misAlertas() { if (S._al && S._al.d === S.data) return S._al.v; const v = alertas(S.data, { hoy: hoy(), diasQuieta: Number(S.data.settings.dias_quieta || 14) }); S._al = { d: S.data, v }; return v; }
+const alertTbl = (arr, vacio) => arr.length ? `<table class="tbl"><tbody>${arr.map((a) => `<tr data-open="${a.kind}" data-id="${h(a.id)}"><td class="mono nowrap">${h(a.code)}</td><td style="max-width:260px" title="${h(a.titulo)}">${h(a.titulo)}</td><td class="wrap small">${h(a.motivo)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${vacio}</div>`;
+VIEWS_FN.alertas = () => {
+  const a = misAlertas(), notas = S.data.notas || [], lider = notas.filter((n) => n.lider && !n.hecha), mias = notas.filter((n) => !n.lider || n.hecha);
+  const nota = (n) => `<tr><td class="ck"><input type="checkbox" class="notack" data-id="${h(n.id)}" ${n.hecha ? 'checked' : ''} title="Hecha"></td><td class="wrap ${n.hecha ? 'mute' : ''}" style="${n.hecha ? 'text-decoration:line-through' : ''}">${h(n.texto)}</td><td class="nowrap mute small">${new Date(n.created_at).toLocaleDateString('es-AR')}</td><td><button class="lnk small" data-act="notadel" data-id="${h(n.id)}">Borrar</button></td></tr>`;
+  return {
+    title: 'Notas y alertas', sub: 'Lo que tenés que revisar o hablar, armado a partir de tus tareas',
+    body: `<div class="cols c11" style="margin-top:0">
+      <div class="card"><div class="ch"><h2>Hablar con mi líder</h2><span class="sub">${a.lider.length + lider.length}</span></div>${alertTbl(a.lider, 'Nada pendiente con el líder.')}
+        ${lider.length ? `<table class="tbl"><tbody>${lider.map(nota).join('')}</tbody></table>` : ''}</div>
+      <div class="card"><div class="ch"><h2>Sugerencias</h2><span class="sub">Por acción, no por proyecto</span></div>${a.sugerencias.length ? `<table class="tbl"><tbody>${a.sugerencias.map((x, i) => `<tr data-act="sug" data-i="${i}" style="cursor:pointer"><td><b>${h(x.texto)}</b><div class="small mute">${h(x.detalle)}</div></td><td class="num"><span class="lnk small">Ver →</span></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Sin sugerencias por ahora.</div>'}</div>
+      <div class="card"><div class="ch"><h2>Publicados sin pagar</h2><span class="sub">Tienen información de pago pendiente: validar</span></div>${alertTbl(a.impagas, 'Todos los publicados figuran pagos (o falta traer el estado de pago desde AppSheet).')}</div>
+      <div class="card"><div class="ch"><h2>Problemas de indexación</h2><span class="sub">MANUAL_INDEX o auditoría con problemas</span></div>${alertTbl(a.indexacion, 'Sin problemas de indexación.')}</div>
+      <div class="card"><div class="ch"><h2>Quietas hace mucho</h2><span class="sub">Más de <select id="diasq" style="width:auto;height:26px;font-size:12px">${opts(['7', '14', '21', '30'], S.data.settings.dias_quieta || '14')}</select> días en el mismo estado</span></div>${alertTbl(a.quietas, 'Ninguna tarea quieta.')}</div>
+      <div class="card"><div class="ch"><h2>Avisos de AppSheet</h2><span class="sub">Texto que muestra AppSheet arriba de la tarea</span></div>${alertTbl(a.appsheet, 'Sin avisos.')}</div>
+    </div>
+    <div class="card" style="margin-top:20px"><div class="ch"><h2>Mis notas</h2></div><form id="notaf" class="cb" style="display:flex;gap:8px;align-items:center"><input name="texto" placeholder="Escribí una nota…" required><label class="check nowrap"><input type="checkbox" name="lider"> Para hablar con el líder</label><button class="btn sm">Agregar</button></form>
+      ${mias.length ? `<table class="tbl"><tbody>${mias.map(nota).join('')}</tbody></table>` : ''}</div>`,
+  };
+};
+
+// ---------- IA y prompts ----------
+const VARS = '{anchor} {url_cliente} {medio} {dr} {palabras_min} {pais} {idioma} {cliente} {dominio_cliente} {codigo} · redacciones: {tema} {subproyecto} {variante} {material} · imagen: {titulo} {texto}';
+function clavesPrompt(p) {
+  if (p.tipo === 'LIN') return [['lb', 'Texto del artículo (link building)'], ['imagen', 'Imagen destacada']];
+  const subs = [...new Set(S.data.red.filter((r) => r.project === p.code && r.subproyecto).map((r) => r.subproyecto))].sort();
+  return [['red', 'Texto (general)'], ...subs.map((x) => [`red:${x}`, `Texto · ${x}`]), ['imagen', 'Imagen (general)'], ...subs.map((x) => [`imagen:${x}`, `Imagen · ${x}`])];
+}
+VIEWS_FN.ia = () => {
+  const st = S.data.settings, ps = projs(), cur = S.f.iaProj || ps[0]?.code, p = proj(cur), pr = (c) => (S.data.prompts || []).find((x) => x.project === cur && x.clave === c)?.texto || '';
+  if (!S.iaEstado && st.gemini) { S.iaEstado = { cargando: true }; api('/api/ia/estado').then((r) => { S.iaEstado = r; render(); }).catch(() => {}); }
+  const e = S.iaEstado || {};
+  return {
+    title: 'IA y prompts', sub: 'Gemini para redactar y generar imágenes con tus prompts por proyecto',
+    body: `<div class="cols c11" style="margin-top:0"><div class="card"><div class="ch"><h2>Gemini</h2>${st.gemini ? (e.conectado ? '<span class="tag ok">Conectado</span>' : e.cargando ? '<span class="tag">Verificando…</span>' : `<span class="tag bad">Error</span>`) : '<span class="tag warn">Sin conectar</span>'}</div><div class="cb">
+      ${e.error ? `<div class="alert" style="margin-top:0">${h(e.error)}</div>` : ''}
+      <ol class="steps" style="margin-top:0"><li>Entrá a <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> con tu cuenta y tocá <b>Crear clave de API</b>.</li><li>Activá la facturación en ese proyecto (así Google no usa los textos de clientes para entrenar).</li><li>Pegá la clave acá. Queda guardada solo en tu servidor; no se muestra de nuevo.</li></ol>
+      <form id="gemf" style="display:flex;gap:8px"><input name="key" type="password" autocomplete="off" placeholder="${st.gemini ? 'Clave guardada · pegá otra para cambiarla' : 'AIza…'}"><button class="btn sm">${st.gemini ? 'Cambiar' : 'Conectar'}</button></form>
+      ${e.conectado ? `<div class="fields" style="margin-top:14px"><label>Modelo para textos<select id="mtexto">${opts(e.modelos.filter((m) => !/image/.test(m)), e.texto)}</select></label><label>Modelo para imágenes<select id="mimagen">${opts(['', ...e.modelos.filter((m) => /image/.test(m))], e.imagen, ['(ninguno)', ...e.modelos.filter((m) => /image/.test(m))])}</select></label></div>
+        <div style="display:flex;gap:8px;margin-top:12px"><button class="btn sm sec" data-act="iamodelos">Guardar modelos</button><button class="btn sm sec" data-act="iaprueba">Probar conexión</button><span id="iamsg" class="small mute" style="align-self:center"></span></div>` : ''}</div></div>
+    <div class="card"><div class="ch"><h2>Google Docs de las tareas</h2>${st.gas ? '<span class="tag ok">Conectado</span>' : '<span class="tag warn">Sin conectar</span>'}</div><div class="cb">
+      <p class="mute" style="margin-top:0">Para pegar el texto (y la imagen) en el documento de cada tarea se usa un script de Google que corre con tu cuenta de Eleven. Se instala una sola vez.</p>
+      <ol class="steps"><li>Abrí <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> con tu cuenta de Eleven y pegá el código (botón de abajo).</li><li><b>Implementar → Nueva implementación → Aplicación web</b>, ejecutar como <b>yo</b>, acceso <b>cualquier usuario</b>. Autorizá.</li><li>Pegá acá la URL que termina en <code>/exec</code>.</li></ol>
+      <form id="gasf" style="display:flex;gap:8px"><input name="url" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${h(st.gas_url)}"><button class="btn sm">Guardar</button></form>
+      <div style="margin-top:10px"><button class="btn sm sec" data-act="gascode">${ic('copy')}Copiar código del script</button></div></div></div></div>
+    <div class="card" style="margin-top:20px"><div class="ch"><h2>Prompts por proyecto</h2><select data-f="iaProj" style="width:auto;margin-left:auto">${opts(ps.map((x) => x.code), cur, ps.map((x) => `${x.code} · ${x.cliente}`))}</select></div><div class="cb">
+      <p class="small mute" style="margin-top:0">Variables disponibles: ${h(VARS)}. Si un tipo queda vacío se usa el general; si el general está vacío, uno básico.</p>
+      <form id="promptf" data-project="${h(cur)}">${clavesPrompt(p).map(([c, t]) => `<label class="full" style="margin-bottom:14px">${h(t)}<textarea name="${h(c)}" style="min-height:${/^imagen/.test(c) ? 90 : 180}px;font-size:13px">${h(pr(c))}</textarea></label>`).join('')}
+      <button class="btn sm">Guardar prompts de ${h(cur)}</button></form></div></div>`,
+  };
+};
+const GAS_CODE = `// Proyectos Eleven → escribe el texto (y la imagen) en el Google Doc de una tarea. Corre con tu cuenta de Eleven.
+const SECRET = '__SECRET__';
+function doPost(e) {
+  try {
+    const b = JSON.parse(e.postData.contents);
+    if (b.secret !== SECRET) return out({ error: 'No autorizado' });
+    const id = docId(b.doc, b.codigo);
+    if (!id) return out({ error: 'No encontré el documento de la tarea ' + (b.codigo || '') });
+    const doc = DocumentApp.openById(id), body = doc.getBody();
+    body.clear();
+    if (b.titulo) body.appendParagraph(b.titulo).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+    if (b.imagen) body.appendImage(Utilities.newBlob(Utilities.base64Decode(b.imagen.data), b.imagen.mime, 'imagen'));
+    String(b.cuerpo || '').split(/\\n{2,}/).forEach(function (bloque) {
+      const t = bloque.trim(); if (!t) return;
+      const m = t.match(/^(#{2,3})\\s+(.*)$/);
+      const p = m ? body.appendParagraph(m[2]).setHeading(m[1].length === 2 ? DocumentApp.ParagraphHeading.HEADING2 : DocumentApp.ParagraphHeading.HEADING3) : body.appendParagraph(t.replace(/\\*\\*/g, ''));
+      links(p);
+    });
+    doc.saveAndClose();
+    return out({ ok: true, doc: 'https://docs.google.com/document/d/' + id + '/edit' });
+  } catch (err) { return out({ error: String(err) }); }
+}
+function links(p) {
+  const t = p.editAsText(); let s = t.getText(), m;
+  while ((m = /\\[([^\\]]+)\\]\\((https?:[^)]+)\\)/.exec(s))) {
+    t.deleteText(m.index, m.index + m[0].length - 1); t.insertText(m.index, m[1]); t.setLinkUrl(m.index, m.index + m[1].length - 1, m[2]); s = t.getText();
+  }
+}
+function docId(url, codigo) {
+  const m = String(url || '').match(/\\/d\\/([\\w-]{20,})/); if (m) return m[1];
+  if (!codigo) return '';
+  const it = DriveApp.searchFiles("title contains '" + codigo.replace(/'/g, '') + "' and mimeType = 'application/vnd.google-apps.document' and trashed = false");
+  return it.hasNext() ? it.next().getId() : '';
+}
+function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }`;
+
+// ---------- registro automático de tiempo ----------
+// Mientras trabajás en una tarea (panel abierto o tareas seleccionadas) y la app está al frente, cada 30 s se suma tiempo a esa tarea.
+// Si dejás de tocar el teclado o el mouse 5 minutos, se pausa. Cada acción (cambiar estado, guardar) se lleva además el tiempo
+// desde la acción anterior (hasta 15 min), que cubre lo que hacés fuera de la app (escribir el mail, el doc). La IA, Claude y la
+// sincronización con AppSheet suman su propio tiempo. Todo va a Horas solo, repartido por proyecto y tipo de tarea.
+let ultimoInput = Date.now();
+['mousemove', 'keydown', 'click', 'scroll', 'wheel'].forEach((e) => document.addEventListener(e, () => { ultimoInput = Date.now(); }, { passive: true, capture: true }));
+function focoActual() {
+  const f = document.querySelector('#drawer.open form[data-id]'), id = f?.dataset.id;
+  if (id && (f.id === 'lbf' || f.id === 'redf' || f.id === 'txf')) return [{ kind: f.id === 'lbf' ? 'lb' : f.id === 'redf' ? 'red' : f.dataset.kind, ref: id }];
+  const k = S.view === 'lb' || S.view === 'red' ? S.view : null;
+  return k && S.sel[k].size ? [...S.sel[k]].slice(0, 50).map((ref) => ({ kind: k, ref })) : [];
+}
+setInterval(() => {
+  if (!S.token || document.visibilityState !== 'visible' || Date.now() - ultimoInput > 5 * 60_000) return;
+  const refs = focoActual(); if (!refs.length) return;
+  api('/api/act/ping', 'POST', { refs }).catch(() => {});
+  S.focoTxt = refs.length === 1 ? (S.data[refs[0].kind].find((x) => x.id === refs[0].ref)?.as_code || S.data[refs[0].kind].find((x) => x.id === refs[0].ref)?.project || '') : `${refs.length} tareas`;
+  S.focoAt = Date.now(); renderTimer();
+  if (++S.pings % 6 === 0 && !$('#drawer').classList.contains('open')) load();
+}, 30_000);
+function renderTimer() {
+  const el = $('#sidetimer'); if (!el) return;
+  const t = hoy(), auto = S.data.hours.filter((x) => x.auto && x.date === t), tot = auto.reduce((a, x) => a + x.hours, 0);
+  const por = {}; for (const a of S.data.actividad || []) por[a.quien] = (por[a.quien] || 0) + (a.fin - a.inicio) / 60000;
+  const activo = S.focoAt && Date.now() - S.focoAt < 70_000;
+  el.innerHTML = `<div class="lbl">${activo ? '<span class="run"></span>' : ''}Tiempo de hoy · automático</div><div class="clock">${Math.floor(tot)}:${String(Math.round((tot % 1) * 60)).padStart(2, '0')} h</div>
+    <div class="small mute">${Object.entries(por).map(([q, m]) => `${h(QUIEN[q] || q)} ${Math.round(m)} min`).join(' · ') || 'Abrí una tarea y empieza a contar'}</div>
+    ${activo ? `<div class="small" style="margin-top:4px">Contando: <b class="mono">${h(S.focoTxt)}</b></div>` : ''}<button class="lnk small" data-act="view" data-v="horas" style="margin-top:6px">Ver horas →</button>`;
+}
 
 // ---------- editor de redacción ----------
 const contar = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
 async function abrirRedaccion(kind, id) {
   const x = S.data[kind].find((o) => o.id === id), t = await api(`/api/texto?kind=${kind}&ref=${encodeURIComponent(id)}`), min = kind === 'lb' ? proj(x.project)?.params?.palabrasMin : null;
-  const titulo = kind === 'lb' ? `${x.as_code || x.project} · ${x.anchor || 'sin anchor'}` : `${x.as_code || x.project} · ${x.tema}`;
+  const titulo = kind === 'lb' ? `${x.as_code || x.project} · ${x.anchor || 'sin anchor'}` : `${x.as_code || x.project} · ${x.tema}`, st = S.data.settings;
+  const tienePrompt = (S.data.prompts || []).some((p) => p.project === x.project && p.texto.trim());
   openDrawer(`<form id="txf" data-kind="${kind}" data-id="${h(id)}" data-min="${h(min ?? '')}"><div class="dh"><h2>Redacción — ${h(titulo)}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
     <div class="db"><div class="fields">
-      ${kind === 'lb' ? `<div class="full small mute">Anchor: <b>${h(x.anchor)}</b> → ${h(x.url_cliente || 'sin URL del cliente')} · Medio: ${h(normDomain(x.medio))}</div>` : ''}
+      ${kind === 'lb' ? `<div class="full small mute">Anchor: <b>${h(x.anchor)}</b> → ${h(x.url_cliente || 'sin URL del cliente')} · Medio: ${h(normDomain(x.medio))}</div>` : `<div class="full small mute">${h([x.subproyecto, x.variante].filter(Boolean).join(' · ') || 'Sin subproyecto')}</div>`}
+      <div class="full iabar">${st.gemini ? `<button type="button" class="btn sm" data-act="iaredactar">${ic('ia')}Redactar con IA</button><button type="button" class="btn sm sec" data-act="iaimagen">${ic('img')}Generar imagen</button>` : `<span class="small mute">Conectá Gemini en <a href="#" data-act="view" data-v="ia">IA y prompts</a> para redactar con un clic.</span>`}
+        ${st.gemini && !tienePrompt ? '<span class="small mute">Sin prompt propio para este proyecto: se usa uno básico.</span>' : ''}<span id="iastat" class="small mute"></span></div>
+      <details class="full" ${kind === 'red' && /receta/i.test(x.subproyecto + x.tema) ? 'open' : ''}><summary class="small">Material de base para la IA (receta copiada, transcripción de un video, notas…)</summary><textarea id="material" style="min-height:120px;margin-top:6px" placeholder="Pegá acá la receta o el texto fuente. La IA arma el contenido completo a partir de esto."></textarea></details>
       <label class="full">Título<input name="titulo" value="${h(t.titulo)}"></label>
-      <label class="full">Texto<textarea name="cuerpo" style="min-height:52vh;font-size:14px;line-height:1.6">${h(t.cuerpo)}</textarea></label>
+      <label class="full">Texto<textarea name="cuerpo" style="min-height:46vh;font-size:14px;line-height:1.6">${h(t.cuerpo)}</textarea></label>
+      <div class="full" id="imgbox"></div>
       <div class="full" style="display:flex;gap:12px;align-items:center"><span id="txcount" class="small"></span><label class="check" style="margin-left:auto"><input type="checkbox" name="lista" ${t.lista ? 'checked' : ''}> Lista para pasar a AppSheet</label></div>
-      <label class="full">Documento en AppSheet (link al Google Doc de la tarea, opcional)<input name="url" type="url" value="${h(t.url)}" placeholder="https://docs.google.com/…"></label>
+      <label class="full">Documento de la tarea (Google Doc)<input name="url" type="url" value="${h(t.url || x.doc_url || '')}" placeholder="https://docs.google.com/document/d/…"></label>
     </div><div class="err" id="ferr"></div></div>
-    <div class="df"><button type="button" class="btn sec left" data-act="copytxt">${ic('copy')}Copiar texto</button><button type="button" class="btn sec" data-act="close">Cerrar</button><button class="btn">Guardar</button></div></form>`, true);
-  contarVivo();
+    <div class="df"><button type="button" class="btn sec left" data-act="copytxt">${ic('copy')}Copiar texto</button>${st.gas ? `<button type="button" class="btn sec" data-act="docenviar">${ic('doc')}Enviar al doc</button>` : ''}<button type="button" class="btn sec" data-act="close">Cerrar</button><button class="btn">Guardar</button></div></form>`, true);
+  contarVivo(); mostrarImagen(kind, id);
+}
+async function mostrarImagen(kind, id) {
+  const box = $('#imgbox'); if (!box) return;
+  try {
+    const r = await fetch(`/api/imagen?kind=${kind}&ref=${encodeURIComponent(id)}`, { headers: { authorization: 'Bearer ' + S.token } });
+    if (r.status !== 200) { box.innerHTML = ''; return; }
+    const u = URL.createObjectURL(await r.blob());
+    box.innerHTML = `<div class="small mute" style="margin-bottom:4px">Imagen</div><img src="${u}" style="max-width:100%;max-height:300px;border-radius:8px;border:1px solid var(--line)"> <a class="lnk small" href="${u}" download="${h(id)}.png">Descargar</a>`;
+  } catch { box.innerHTML = ''; }
+}
+async function iaRedactarUI(el) {
+  const f = $('#txf'); if (f.cuerpo.value.trim() && !confirm('Ya hay texto. ¿Reemplazarlo por uno nuevo de la IA?')) return;
+  el.disabled = true; $('#iastat').textContent = 'Redactando… (puede tardar un minuto)';
+  try {
+    const r = await api('/api/ia/redactar', 'POST', { kind: f.dataset.kind, ref: f.dataset.id, material: $('#material')?.value || '' });
+    f.titulo.value = r.titulo; f.cuerpo.value = r.cuerpo; contarVivo(); $('#iastat').textContent = `Listo en ${r.segundos} s con ${r.modelo}. Revisalo antes de marcarlo como listo.`;
+  } catch (e) { $('#iastat').textContent = e.message; }
+  el.disabled = false;
+}
+async function iaImagenUI(el) {
+  const f = $('#txf'); el.disabled = true; $('#iastat').textContent = 'Generando imagen…';
+  try { await api('/api/ia/imagen', 'POST', { kind: f.dataset.kind, ref: f.dataset.id, titulo: f.titulo.value }); $('#iastat').textContent = 'Imagen lista.'; await mostrarImagen(f.dataset.kind, f.dataset.id); }
+  catch (e) { $('#iastat').textContent = e.message; }
+  el.disabled = false;
+}
+async function docEnviarUI(el) {
+  const f = $('#txf'); el.disabled = true;
+  try {
+    await api('/api/texto', 'POST', { kind: f.dataset.kind, ref: f.dataset.id, titulo: f.titulo.value, cuerpo: f.cuerpo.value, url: f.url.value, lista: f.lista.checked });
+    const r = await api('/api/doc/enviar', 'POST', { kind: f.dataset.kind, ref: f.dataset.id, doc_url: f.url.value, conImagen: !!$('#imgbox img') });
+    if (r.doc) f.url.value = r.doc; toast('Texto pegado en el documento de la tarea');
+  } catch (e) { toast(e.message); }
+  el.disabled = false;
 }
 function contarVivo() { const f = $('#txf'); if (!f) return; const n = contar(f.cuerpo.value), min = Number(f.dataset.min || 0); $('#txcount').innerHTML = `${n} palabras${min ? ` · mínimo del proyecto: ${min} ${n >= min ? '<span class="tag ok">OK</span>' : `<span class="tag warn">faltan ${min - n}</span>`}` : ''}`; }
 
@@ -398,10 +634,10 @@ document.addEventListener('click', async (ev) => {
   const sortTh = ev.target.closest('th[data-sort]');
   if (sortTh) { const v = sortTh.dataset.sv, k = sortTh.dataset.sort, cur = S.sort[v]; S.sort[v] = [k, cur[0] === k ? -cur[1] : 1]; return render(); }
   const row = ev.target.closest('tr[data-open]');
-  if (row && !ev.target.closest('select,button,input')) { const k = row.dataset.open, x = S.data[k].find((o) => o.id === row.dataset.id); return openDrawer({ lb: lbForm, red: redForm, hours: hoursForm }[k](x)); }
+  if (row && !ev.target.closest('select,button,input,td.ck,a')) { const k = row.dataset.open, x = S.data[k].find((o) => o.id === row.dataset.id); return openDrawer({ lb: lbForm, red: redForm, hours: hoursForm }[k](x)); }
   const el = ev.target.closest('[data-act]'); if (!el || el.tagName === 'SELECT') return;
   switch (el.dataset.act) {
-    case 'view': S.view = el.dataset.v; localStorage.setItem('pe_view', S.view); if (S.view === 'ajustes') loadCal(); $('#view') && ($('#view').scrollTop = 0); render(); break;
+    case 'view': ev.preventDefault(); closeDrawer(); if (el.dataset.v === 'ia') S.iaEstado = null; S.view = el.dataset.v; localStorage.setItem('pe_view', S.view); if (S.view === 'ajustes') loadCal(); $('#view') && ($('#view').scrollTop = 0); render(); break;
     case 'newlb': openDrawer(lbForm()); break;
     case 'newred': openDrawer(redForm()); break;
     case 'newhours': openDrawer(hoursForm()); break;
@@ -410,14 +646,29 @@ document.addEventListener('click', async (ev) => {
     case 'redactar': try { await abrirRedaccion(el.dataset.kind, el.dataset.id); } catch (e) { toast(e.message); } break;
     case 'copytxt': { const f = $('#txf'); navigator.clipboard?.writeText((f.titulo.value ? f.titulo.value + '\n\n' : '') + f.cuerpo.value).then(() => toast('Texto copiado')); break; }
     case 'del': { const f = el.closest('form'), k = el.dataset.kind; if (confirm('¿Borrar? No se puede deshacer.')) guardar(() => api(`/api/${k}/${f.dataset.id}`, 'DELETE'), 'Borrado'); break; }
-    case 'tstart': try { S.ttype = $('#ttype').value; await setTimer({ project: $('#tproj').value, task_type: $('#ttype').value, start: Date.now() }); renderTimer(); } catch (e) { toast(e.message); } break;
-    case 'tstop': {
-      const tm = timer(), hrs = Math.round(((Date.now() - tm.start) / 3600000) * 100) / 100;
-      if (hrs < 0.01) { await setTimer(null); renderTimer(); break; }
-      try { await api('/api/hours', 'POST', { project: tm.project, task_type: tm.task_type, hours: Math.min(hrs, 24), date: hoy(), note: 'Cronómetro' }); await setTimer(null); toast(`Se guardaron ${fmtN(hrs)} h en ${tm.project}`); await load(); } catch (e) { toast(e.message); }
+    case 'bulkclear': S.sel[el.dataset.k].clear(); render(); break;
+    case 'bulkgo': {
+      const k = el.dataset.k, estado = $('#bulkest').value, ids = [...S.sel[k]];
+      if (!confirm(`¿Pasar ${ids.length} tarea${ids.length > 1 ? 's' : ''} a "${estado}"? Queda anotado en Para AppSheet.`)) break;
+      try { const r = await api('/api/bulk', 'POST', { kind: k, ids, estado }); S.sel[k].clear(); toast(`${r.n} tarea${r.n === 1 ? '' : 's'} en "${estado}"`); await load(); } catch (e) { toast(e.message); }
       break;
     }
-    case 'tdiscard': if (confirm('¿Descartar el tiempo del cronómetro?')) { await setTimer(null); renderTimer(); } break;
+    case 'tab': S.f[el.dataset.f] = el.dataset.v; render(); break;
+    case 'sug': { const x = misAlertas().sugerencias[Number(el.dataset.i)]; if (x.filtro.view) { S.view = x.filtro.view; } else { S.view = 'lb'; Object.assign(S.f, { lbProj: '', lbMail: '', lbNeg: '', lbMes: '', lbQ: '', lbUser: YO }, x.filtro); } render(); break; }
+    case 'notadel': if (confirm('¿Borrar la nota?')) { await api('/api/notas/' + el.dataset.id, 'DELETE'); await load(); } break;
+    case 'planarmar': try { await armarPlan(); } catch (e) { toast(e.message); } break;
+    case 'planvalidar': { const r = await api('/api/planes?month=' + S.f.planMes); await api('/api/planes', 'POST', { month: S.f.planMes, estado: 'pedida', data: r.data }); S.plan = null; render(); break; }
+    case 'presusave': {
+      const ps = S.data.projects.map((p) => { const i = document.querySelector(`.presu[data-code="${p.code}"]`); return { ...p, params: { ...p.params, ...(i ? { presupuestoUSD: i.value } : {}) } }; });
+      try { await api('/api/projects', 'POST', { projects: ps }); toast('Presupuestos guardados'); await load(); } catch (e) { toast(e.message); }
+      break;
+    }
+    case 'iamodelos': await api('/api/settings', 'POST', { gemini_model_texto: $('#mtexto').value, gemini_model_imagen: $('#mimagen').value }); S.iaEstado = null; toast('Modelos guardados'); await load(); break;
+    case 'iaprueba': { $('#iamsg').textContent = 'Probando…'; try { const r = await api('/api/ia/prueba', 'POST'); $('#iamsg').textContent = `${r.modelo}: "${r.respuesta}" (${(r.ms / 1000).toFixed(1)} s)`; } catch (e) { $('#iamsg').textContent = e.message; } break; }
+    case 'gascode': { const { secret } = await api('/api/gas/secret'); if (!secret) { toast('Primero guardá la URL (o cualquier texto) para generar la clave del script'); break; } navigator.clipboard?.writeText(GAS_CODE.replace('__SECRET__', secret)).then(() => toast('Código copiado: pegalo en script.google.com')); break; }
+    case 'iaredactar': await iaRedactarUI(el); break;
+    case 'iaimagen': await iaImagenUI(el); break;
+    case 'docenviar': await docEnviarUI(el); break;
     case 'copy': navigator.clipboard?.writeText(el.dataset.v).then(() => toast('Mail copiado')); break;
     case 'copycal': navigator.clipboard?.writeText(S.calurl || '').then(() => toast('Link copiado')); break;
     case 'resetcal': if (confirm('El link anterior deja de funcionar y vas a tener que volver a agregarlo en Google Calendar. ¿Seguir?')) { S.calurl = (await api('/api/calendar/reset', 'POST')).url; render(); } break;
@@ -433,13 +684,17 @@ document.addEventListener('click', async (ev) => {
 });
 document.addEventListener('change', async (ev) => {
   const el = ev.target;
+  if (el.classList.contains('selck')) { const k = el.dataset.k; el.checked ? S.sel[k].add(el.dataset.id) : S.sel[k].delete(el.dataset.id); render(); api('/api/act/ping', 'POST', { refs: [...S.sel[k]].map((ref) => ({ kind: k, ref })) }).catch(() => {}); return; }
+  if (el.classList.contains('selall')) { const k = el.dataset.k; for (const id of S.visibles?.[k] || []) el.checked ? S.sel[k].add(id) : S.sel[k].delete(id); render(); return; }
+  if (el.classList.contains('notack')) { const n = S.data.notas.find((x) => x.id === el.dataset.id); await api('/api/notas', 'POST', { ...n, hecha: el.checked }); await load(); return; }
+  if (el.id === 'diasq') { await api('/api/settings', 'POST', { dias_quieta: el.value }); await load(); return; }
+  if (el.id === 'medcsv' && el.files[0]) { importarCompilado(el.files[0]).catch((e) => toast(e.message)); return; }
   if (el.dataset.f && el.type !== 'search') { S.f[el.dataset.f] = el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value; render(); return; }
   if (el.dataset.act === 'lbestado' || el.dataset.act === 'redestado') {
     const kind = el.dataset.act === 'lbestado' ? 'lb' : 'red', x = S.data[kind].find((o) => o.id === el.dataset.id);
     try { await api('/api/' + kind, 'POST', { ...x, estado: el.value }); toast('Estado actualizado · anotado en Pendientes AppSheet'); await load(); } catch (e) { toast(e.message); el.value = x.estado; }
     return;
   }
-  if (el.dataset.act === 'tproj') { S.tproj = el.value; $('#ttype').innerHTML = opts(TAREAS[proj(el.value).tipo]); return; }
   if (el.dataset.act === 'hrproj') { el.form.task_type.innerHTML = opts(TAREAS[proj(el.value).tipo]); return; }
   if (el.dataset.act === 'lbproj') { const pp = proj(el.value)?.params || {}; if (pp.servicio) el.form.tipo_servicio.value = pp.servicio; }
   if (el.closest('#lbf')) lbAvisosVivos();
@@ -460,13 +715,17 @@ document.addEventListener('submit', async (ev) => {
   if (f.id === 'lbf') return guardar(() => api('/api/lb', 'POST', { ...formData(f), id: f.dataset.id || undefined }), 'Tarea guardada');
   if (f.id === 'redf') return guardar(() => { const d = formData(f); return api('/api/red', 'POST', { ...d, ia: d.ia === '1', id: f.dataset.id || undefined }); }, 'Redacción guardada');
   if (f.id === 'txf') return guardar(() => api('/api/texto', 'POST', { kind: f.dataset.kind, ref: f.dataset.id, titulo: f.titulo.value, cuerpo: f.cuerpo.value, url: f.url.value, lista: f.lista.checked }), 'Redacción guardada');
+  if (f.id === 'notaf') { try { await api('/api/notas', 'POST', { texto: f.texto.value, lider: f.lider.checked }); await load(); } catch (e) { toast(e.message); } return; }
+  if (f.id === 'gemf') { try { const r = await api('/api/ia/key', 'POST', { key: f.key.value.trim() }); S.iaEstado = null; toast(`Gemini conectado · textos: ${r.texto || '—'} · imágenes: ${r.imagen || '—'}`); await load(); } catch (e) { toast(e.message); } return; }
+  if (f.id === 'gasf') { try { await api('/api/gas', 'POST', { url: f.url.value.trim() }); toast('Script guardado'); await load(); } catch (e) { toast(e.message); } return; }
+  if (f.id === 'promptf') { try { for (const [clave, texto] of Object.entries(formData(f))) await api('/api/prompts', 'POST', { project: f.dataset.project, clave, texto }); toast('Prompts guardados'); await load(); } catch (e) { toast(e.message); } return; }
   if (f.id === 'hrf') return guardar(() => api('/api/hours', 'POST', { ...formData(f), id: f.dataset.id || undefined }), 'Horas guardadas');
   if (f.id === 'planf') {
     const d = formData(f), rows = Object.keys(d).filter((k) => /^p\d+$/.test(k)).map((k) => { const i = k.slice(1), [project, task_type] = d[k].split('|'); return { project, task_type, hours: d['h' + i], units: d['u' + i] }; });
     return guardar(() => api('/api/plan', 'POST', { month: S.f.mes, rows }), 'Plan guardado');
   }
   if (f.id === 'projf') {
-    const projects = [...f.querySelectorAll('tr[data-code]')].map((tr) => { const g = (n) => tr.querySelector(`[name=${n}]`)?.value ?? ''; return { code: tr.dataset.code, cliente: g('cliente'), active: tr.querySelector('[name=active]').checked, params: { drMin: g('drMin'), trafMin: g('trafMin'), precioMaxUSD: g('precioMaxUSD'), repDias: g('repDias'), palabrasMin: g('palabrasMin'), dominio: g('dominio'), paises: g('paises'), servicio: g('servicio') } }; });
+    const projects = [...f.querySelectorAll('tr[data-code]')].map((tr) => { const g = (n) => tr.querySelector(`[name=${n}]`)?.value ?? ''; return { code: tr.dataset.code, cliente: g('cliente'), active: tr.querySelector('[name=active]').checked, params: { drMin: g('drMin'), trafMin: g('trafMin'), precioMaxUSD: g('precioMaxUSD'), repDias: g('repDias'), palabrasMin: g('palabrasMin'), presupuestoUSD: g('presupuestoUSD'), dominio: g('dominio'), paises: g('paises'), servicio: g('servicio') } }; });
     try { await api('/api/projects', 'POST', { projects }); toast('Proyectos guardados'); await load(); } catch (e) { toast(e.message); }
   }
 });

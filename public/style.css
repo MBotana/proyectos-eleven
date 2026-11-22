@@ -106,3 +106,18 @@ label{display:block;font-size:12px;font-weight:500;color:var(--ink2)}label>input
 code.url{display:block;font:12px/1.5 var(--mono);word-break:break-all;background:#f9fafb;border:1px solid var(--line);border-radius:6px;padding:10px;user-select:all}
 ol.steps{margin:10px 0;padding-left:18px;color:var(--ink2)}ol.steps li{margin:3px 0}
 .check{display:flex;align-items:center;gap:8px;font-weight:400;color:var(--ink)}
+
+/* selección en lote */
+.tbl th.ck, .tbl td.ck { width: 34px; padding-right: 0; }
+.tbl td.ck input, .tbl th.ck input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
+.tbl tr.selrow td { background: var(--acc-bg); }
+.bulk { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 12px; background: #fff; border: 1px solid #c7d7fe; border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 24, 40, .08); }
+.bulk select { width: auto; min-width: 220px; height: 32px; }
+/* pestañas */
+.tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; background: none; padding: 8px 12px; font: inherit; font-size: 13px; color: var(--ink2); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.tabs button.on { color: var(--acc); border-bottom-color: var(--acc); font-weight: 600; }
+.count.hotc { background: #fee4e2; color: #b42318; }
+.iabar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; background: var(--acc-bg); border-radius: 8px; }
+details summary { cursor: pointer; color: var(--ink2); }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }

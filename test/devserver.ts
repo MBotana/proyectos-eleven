@@ -6,8 +6,9 @@ import { extname, join } from 'node:path';
 import { handle } from '../src/worker.ts';
 
 const db = new DatabaseSync(':memory:');
-const DB = { prepare: (sql: string) => { const st = db.prepare(sql); let a: any[] = [];
-  const o: any = { bind: (...x: any[]) => { a = x; return o; }, first: async () => st.get(...a) ?? null, all: async () => ({ results: st.all(...a) }), run: async () => { st.run(...a); return {}; } }; return o; } };
+const mk = (st: any, a: any[]): any => ({ bind: (...x: any[]) => mk(st, x), first: async () => st.get(...a) ?? null, all: async () => ({ results: st.all(...a) }), run: async () => { st.run(...a); return {}; } });
+const DB: any = { prepare: (sql: string) => mk(db.prepare(sql), []), batch: async (sts: any[]) => { for (const st of sts) await st.run(); return []; } };
+db.exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT OR REPLACE INTO settings VALUES ('import_key', 'clave-de-importacion-larga-123')");
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 const dir = new URL('../public', import.meta.url).pathname;
 
