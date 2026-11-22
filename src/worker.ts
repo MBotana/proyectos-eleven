@@ -132,13 +132,13 @@ async function saveLB(env: Env, b: any) {
     const publicado = PUBLICADOS.has(v.estado) ? (old.publicado || hoy) : '';
     await env.DB.prepare(`UPDATE lb_tasks SET ${LB_FIELDS.map(k => `${k} = ?`).join(', ')}, publicado = ?, updated_at = ?, estado_at = ? WHERE id = ?`)
       .bind(...LB_FIELDS.map(k => (v as any)[k]), publicado, now, old.estado !== v.estado ? now : (old.estado_at ?? now), b.id).run();
-    if (changes.length) await logAS(env, 'lb', b.id, label, changes.join(' · '));
+    if (changes.length && !old.prueba) await logAS(env, 'lb', b.id, label, changes.join(' · '));
     return b.id as string;
   }
   const id = newId();
-  await env.DB.prepare(`INSERT INTO lb_tasks (id, ${LB_FIELDS.join(', ')}, publicado, created_at, updated_at, estado_at) VALUES (?, ${LB_FIELDS.map(() => '?').join(', ')}, ?, ?, ?, ?)`)
-    .bind(id, ...LB_FIELDS.map(k => (v as any)[k]), PUBLICADOS.has(v.estado) ? hoy : '', now, now, now).run();
-  await logAS(env, 'lb', id, label, `Tarea nueva (${v.estado})`);
+  await env.DB.prepare(`INSERT INTO lb_tasks (id, ${LB_FIELDS.join(', ')}, publicado, created_at, updated_at, estado_at, prueba) VALUES (?, ${LB_FIELDS.map(() => '?').join(', ')}, ?, ?, ?, ?, ?)`)
+    .bind(id, ...LB_FIELDS.map(k => (v as any)[k]), PUBLICADOS.has(v.estado) ? hoy : '', now, now, now, b.prueba ? 1 : 0).run();
+  if (!b.prueba) await logAS(env, 'lb', id, label, `Tarea nueva (${v.estado})`);
   return id;
 }
 
@@ -164,13 +164,13 @@ async function saveRED(env: Env, b: any) {
     const entregada = old.entregada || '';
     await env.DB.prepare(`UPDATE redacciones SET ${RED_FIELDS.map(k => `${k} = ?`).join(', ')}, entregada = ?, updated_at = ?, estado_at = ? WHERE id = ?`)
       .bind(...RED_FIELDS.map(k => (v as any)[k]), entregada, now, old.estado !== v.estado ? now : (old.estado_at ?? now), b.id).run();
-    if (changes.length) await logAS(env, 'red', b.id, `${v.project} · ${v.tema}`, changes.join(' · '));
+    if (changes.length && !old.prueba) await logAS(env, 'red', b.id, `${v.project} · ${v.tema}`, changes.join(' · '));
     return b.id as string;
   }
   const id = newId();
-  await env.DB.prepare(`INSERT INTO redacciones (id, ${RED_FIELDS.join(', ')}, entregada, created_at, updated_at, estado_at) VALUES (?, ${RED_FIELDS.map(() => '?').join(', ')}, ?, ?, ?, ?)`)
-    .bind(id, ...RED_FIELDS.map(k => (v as any)[k]), '', now, now, now).run();
-  await logAS(env, 'red', id, `${v.project} · ${v.tema}`, 'Redacción nueva: cargar en AppSheet (Carga de Redacciones)');
+  await env.DB.prepare(`INSERT INTO redacciones (id, ${RED_FIELDS.join(', ')}, entregada, created_at, updated_at, estado_at, prueba) VALUES (?, ${RED_FIELDS.map(() => '?').join(', ')}, ?, ?, ?, ?, ?)`)
+    .bind(id, ...RED_FIELDS.map(k => (v as any)[k]), '', now, now, now, b.prueba ? 1 : 0).run();
+  if (!b.prueba) await logAS(env, 'red', id, `${v.project} · ${v.tema}`, 'Redacción nueva: cargar en AppSheet (Carga de Redacciones)');
   return id;
 }
 
@@ -239,8 +239,8 @@ export async function importAS(env: Env, b: any) {
 const icsEsc = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 const fold = (line: string) => { const out: string[] = []; let s = line; while (enc(s).length > 74) { let n = 74; while (enc(s.slice(0, n)).length > 74) n--; out.push(s.slice(0, n)); s = ' ' + s.slice(n); } out.push(s); return out.join('\r\n'); };
 export async function buildICS(env: Env, origin: string) {
-  const lb = (await env.DB.prepare("SELECT * FROM lb_tasks WHERE deadline != '' AND estado NOT LIKE 'Backlink Publicado%' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ?").bind(YO).all()).results as any[];
-  const red = (await env.DB.prepare("SELECT * FROM redacciones WHERE fecha_entrega != '' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ?").bind(YO).all()).results as any[];
+  const lb = (await env.DB.prepare("SELECT * FROM lb_tasks WHERE deadline != '' AND estado NOT LIKE 'Backlink Publicado%' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ? AND prueba = 0").bind(YO).all()).results as any[];
+  const red = (await env.DB.prepare("SELECT * FROM redacciones WHERE fecha_entrega != '' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ? AND prueba = 0").bind(YO).all()).results as any[];
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const ev = (uid: string, date: string, summary: string, desc: string) => [
     'BEGIN:VEVENT', `UID:${uid}@proyectos-eleven`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${date.replace(/-/g, '')}`, `DTEND;VALUE=DATE:${addDays(date, 1).replace(/-/g, '')}`,
@@ -296,8 +296,8 @@ function horaLocal(ms: number) {
 /** Textos de los avisos del día (vencidas, hoy, mañana). Exportada para las pruebas. */
 export async function resumenDeadlines(env: Env, hoy: string) {
   const man = addDays(hoy, 1);
-  const lb = (await env.DB.prepare("SELECT project, anchor, as_code, deadline FROM lb_tasks WHERE deadline != '' AND deadline <= ? AND estado NOT LIKE 'Backlink Publicado%' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ?").bind(man, YO).all()).results as any[];
-  const red = (await env.DB.prepare("SELECT project, tema, fecha_entrega AS deadline FROM redacciones WHERE fecha_entrega != '' AND fecha_entrega <= ? AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ?").bind(man, YO).all()).results as any[];
+  const lb = (await env.DB.prepare("SELECT project, anchor, as_code, deadline FROM lb_tasks WHERE deadline != '' AND deadline <= ? AND estado NOT LIKE 'Backlink Publicado%' AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ? AND prueba = 0").bind(man, YO).all()).results as any[];
+  const red = (await env.DB.prepare("SELECT project, tema, fecha_entrega AS deadline FROM redacciones WHERE fecha_entrega != '' AND fecha_entrega <= ? AND estado NOT IN ('Cerrado', 'Anulado') AND usuario = ? AND prueba = 0").bind(man, YO).all()).results as any[];
   const all = [...lb.map(t => ({ d: t.deadline, txt: `${t.project} ${t.anchor || t.as_code || ''}`.trim() })), ...red.map(r => ({ d: r.deadline, txt: `${r.project} ${r.tema}` }))];
   const venc = all.filter(x => x.d < hoy), hoyL = all.filter(x => x.d === hoy), manL = all.filter(x => x.d === man);
   const parts: string[] = [];
@@ -352,8 +352,8 @@ export async function actAgente(env: Env, quien: string, refs: Ref[], accion: st
 export async function horasAuto(env: Env, desde: string) {
   const rows = (await env.DB.prepare('SELECT * FROM actividad WHERE fecha >= ? ORDER BY inicio').bind(desde).all()).results as any[];
   if (!rows.length) return [];
-  const lb = new Map(((await env.DB.prepare('SELECT id, project, estado FROM lb_tasks').all()).results as any[]).map(t => [t.id, t]));
-  const red = new Map(((await env.DB.prepare('SELECT id, project, estado, ia FROM redacciones').all()).results as any[]).map(t => [t.id, t]));
+  const lb = new Map(((await env.DB.prepare('SELECT id, project, estado FROM lb_tasks WHERE prueba = 0').all()).results as any[]).map(t => [t.id, t]));
+  const red = new Map(((await env.DB.prepare('SELECT id, project, estado, ia FROM redacciones WHERE prueba = 0').all()).results as any[]).map(t => [t.id, t]));
   const plan = (await env.DB.prepare('SELECT * FROM plan WHERE month >= ?').bind(desde.slice(0, 7)).all()).results as any[];
   const acc = new Map<string, { date: string; project: string; task_type: string; s: number; por: Record<string, number> }>();
   for (const a of rows) {
@@ -381,7 +381,7 @@ async function bulkEstado(env: Env, b: any) {
     const t = await env.DB.prepare(`SELECT * FROM ${table} WHERE id = ?`).bind(id).first(); if (!t || t.estado === estado) continue;
     if (kind === 'lb') await env.DB.prepare('UPDATE lb_tasks SET estado = ?, estado_at = ?, updated_at = ?, publicado = ? WHERE id = ?').bind(estado, now, now, PUBLICADOS.has(estado) ? (t.publicado || hoy) : '', id).run();
     else await env.DB.prepare('UPDATE redacciones SET estado = ?, estado_at = ?, updated_at = ? WHERE id = ?').bind(estado, now, now, id).run();
-    await logAS(env, kind, id, t.as_code || `${t.project} · ${t.anchor || t.tema || ''}`, `estado: ${t.estado} → ${estado} (en lote)`); n++;
+    if (!t.prueba) await logAS(env, kind, id, t.as_code || `${t.project} · ${t.anchor || t.tema || ''}`, `estado: ${t.estado} → ${estado} (en lote)`); n++;
   }
   await actAccion(env, ids.map(ref => ({ kind, ref })), `Cambio de estado en lote → ${estado}`, now);
   return n;
@@ -671,7 +671,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const table = { lb: 'lb_tasks', red: 'redacciones', hours: 'hours' }[del[1] as 'lb' | 'red' | 'hours'];
       if (del[1] !== 'hours') {
         const r = await env.DB.prepare(`SELECT * FROM ${table} WHERE id = ?`).bind(del[2]).first();
-        if (r) await logAS(env, del[1] as 'lb' | 'red', del[2], r.as_code || `${r.project} · ${r.anchor || r.tema || ''}`, 'Borrada en la app (revisar si hay que borrarla en AppSheet)');
+        if (r && !r.prueba) await logAS(env, del[1] as 'lb' | 'red', del[2], r.as_code || `${r.project} · ${r.anchor || r.tema || ''}`, 'Borrada en la app (revisar si hay que borrarla en AppSheet)');
       }
       await env.DB.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(del[2]).run(); return json({ ok: true });
     }
@@ -687,7 +687,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const old = await env.DB.prepare('SELECT lista FROM textos WHERE kind = ? AND ref = ?').bind(kind, ref).first();
       await env.DB.prepare('INSERT INTO textos (kind, ref, titulo, cuerpo, url, palabras, lista, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(kind, ref) DO UPDATE SET titulo = excluded.titulo, cuerpo = excluded.cuerpo, url = excluded.url, palabras = excluded.palabras, lista = excluded.lista, updated_at = excluded.updated_at')
         .bind(kind, ref, str(b.titulo, 300), cuerpo, str(b.url, 500), palabras, b.lista ? 1 : 0, Date.now()).run();
-      if (b.lista && !(old && old.lista)) await logAS(env, kind, ref, t.as_code || `${t.project} · ${t.anchor || t.tema || ''}`, `Redacción lista en la app (${palabras} palabras): pasarla al documento de AppSheet`);
+      if (b.lista && !(old && old.lista) && !t.prueba) await logAS(env, kind, ref, t.as_code || `${t.project} · ${t.anchor || t.tema || ''}`, `Redacción lista en la app (${palabras} palabras): pasarla al documento de AppSheet`);
       return json({ ok: true, palabras });
     }
     if (path === '/api/projects' && m === 'POST') {

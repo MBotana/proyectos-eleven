@@ -28,6 +28,8 @@ const IC = {
   appsheet: '<path d="M21 12a9 9 0 0 1-15.5 6.2M3 12a9 9 0 0 1 15.5-6.2"/><path d="M18 2v4h-4M6 22v-4h4"/>',
   ajustes: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  pruebas: '<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   plan: '<path d="M8 2v4M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18M8 14h3M8 18h6"/>',
   alertas: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   ia: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
@@ -43,9 +45,12 @@ async function api(path, method = 'GET', body) {
   if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
   return j;
 }
+/** Las tareas de prueba viven aparte (S.data.lbP / redP): nunca se mezclan con las reales ni van a AppSheet. */
+function separarPruebas(d) { if (!d || d.lbP) return d; d.lbP = d.lb.filter((t) => t.prueba); d.lb = d.lb.filter((t) => !t.prueba); d.redP = d.red.filter((t) => t.prueba); d.red = d.red.filter((t) => !t.prueba); return d; }
+const tarea = (k, id) => S.data[k].find((o) => o.id === id) || S.data[k + 'P']?.find((o) => o.id === id);
 async function load() {
-  try { S.data = await api('/api/data'); localStorage.setItem('pe_cache', JSON.stringify(S.data)); }
-  catch { if (!S.data) { try { S.data = JSON.parse(localStorage.getItem('pe_cache') || 'null'); } catch { /* nada */ } } if (S.token) toast('Sin conexión: se muestran los últimos datos'); }
+  try { S.data = separarPruebas(await api('/api/data')); localStorage.setItem('pe_cache', JSON.stringify({ ...S.data, lb: [...S.data.lb, ...S.data.lbP], red: [...S.data.red, ...S.data.redP], lbP: undefined, redP: undefined })); }
+  catch { if (!S.data) { try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); } catch { /* nada */ } } if (S.token) toast('Sin conexión: se muestran los últimos datos'); }
   render();
 }
 const proj = (code) => S.data.projects.find((p) => p.code === code);
@@ -64,15 +69,16 @@ const redBadge = (e) => `<span class="badge b${e === 'Cerrado' ? 7 : /^Para CMS/
 function dlTag(d, done) { if (!d) return '<span class="mute">—</span>'; const t = hoy(); if (done) return `<span class="mute">${fmtD(d)}</span>`; return d < t ? `<span class="tag bad">${fmtD(d)}</span>` : d === t ? `<span class="tag warn">Hoy</span>` : d <= addDays(t, 2) ? `<span class="tag warn">${fmtD(d)}</span>` : fmtD(d); }
 
 // ---------- marco ----------
-const VIEWS = [['inicio', 'Inicio'], ['alertas', 'Notas y alertas'], ['lb', 'Links'], ['red', 'Redacciones'], ['medios', 'Medios'], ['plan', 'Planificación'], ['horas', 'Horas'], ['sep'], ['proyectos', 'Proyectos'], ['ia', 'IA y prompts'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
+const VIEWS = [['inicio', 'Inicio'], ['alertas', 'Notas y alertas'], ['lb', 'Links'], ['red', 'Redacciones'], ['medios', 'Medios'], ['plan', 'Planificación'], ['horas', 'Horas'], ['sep'], ['proyectos', 'Proyectos'], ['ia', 'IA y prompts'], ['pruebas', 'Pruebas'], ['appsheet', 'Para AppSheet'], ['ajustes', 'Ajustes']];
 function render() {
   if (!S.token) return renderLogin();
   if (!S.data) { $('#app').innerHTML = '<div class="login"><div class="mute">Cargando…</div></div>'; return; }
   if (!$('#shell')) $('#app').innerHTML = `<div id="shell"><aside id="side"><div class="brand"><img src="/icon.svg" alt=""><div><b>Proyectos Eleven</b><small>Link building · Contenido</small></div></div><nav id="nav"></nav><div id="sidetimer"></div></aside><section id="main"><header id="head"></header><div id="view"></div></section></div>`;
   const al = misAlertas(), counts = { lb: S.data.lb.filter((t) => t.usuario === YO && !esCerradoLB(t.estado)).length, red: S.data.red.filter((r) => r.usuario === YO && !esCerradoRED(r.estado)).length, appsheet: S.data.as_pend.length, alertas: al.lider.length + al.impagas.length + al.indexacion.length };
   $('#nav').innerHTML = VIEWS.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count${k === 'alertas' ? ' hotc' : ''}">${counts[k]}</span>` : ''}</button>`)).join('');
+  S.enPruebas = S.view === 'pruebas';
   const v = VIEWS_FN[S.view] || VIEWS_FN.inicio, out = v();
-  $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}</div>`;
+  $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}<button class="btn sec" data-act="actualizar" title="Trae los últimos cambios (los míos y los tuyos) y la última versión de la app">${ic('refresh')}Actualizar</button></div>`;
   const keep = $('#view').scrollTop; $('#view').innerHTML = out.body; $('#view').scrollTop = keep;
   renderTimer();
 }
@@ -151,19 +157,20 @@ const selTd = (k, id) => `<td class="ck"><input type="checkbox" class="selck" da
 const selAllTh = (k, arr) => { const all = arr.length && arr.every((x) => S.sel[k].has(x.id)); S.visibles = { ...(S.visibles || {}), [k]: arr.map((x) => x.id) }; return `<th class="ck"><input type="checkbox" class="selall" data-k="${k}" title="Seleccionar las ${arr.length} visibles" ${all ? 'checked' : ''}></th>`; };
 function bulkBar(k, arr) {
   const n = S.sel[k].size; if (!n) return '';
-  const lista = k === 'lb' ? ESTADOS_LB : ESTADOS_RED, selec = S.data[k].filter((x) => S.sel[k].has(x.id)), est = [...new Set(selec.map((x) => x.estado))];
+  const lista = k === 'lb' ? ESTADOS_LB : ESTADOS_RED, selec = [...S.data[k], ...S.data[k + 'P']].filter((x) => S.sel[k].has(x.id)), est = [...new Set(selec.map((x) => x.estado))];
   return `<div class="bulk"><b>${n} seleccionada${n > 1 ? 's' : ''}</b><span class="mute small">${h(est.slice(0, 3).join(' · '))}${est.length > 3 ? '…' : ''} · ${h([...new Set(selec.map((x) => x.project))].join(', '))}</span>
     <span style="margin-left:auto" class="small">Pasar a</span><select id="bulkest">${opts(lista, k === 'lb' ? PASOS_LB[est[0]]?.sigue || '' : PASOS_RED[est[0]]?.sigue || '')}</select>
     <button class="btn sm" data-act="bulkgo" data-k="${k}">Aplicar</button><button class="btn sm sec" data-act="bulkclear" data-k="${k}">Limpiar</button></div>`;
 }
 
 VIEWS_FN.lb = () => {
+  const src = S.enPruebas ? S.data.lbP : S.data.lb;
   const f = S.f, q = f.lbQ.trim().toLowerCase();
-  let arr = S.data.lb.filter((t) => (!f.lbProj || t.project === f.lbProj) && (!f.lbUser || t.usuario === f.lbUser) && (!f.lbMail || t.mail_eleven === f.lbMail) && (!f.lbNeg || t.estado_neg === f.lbNeg) && (!f.lbMes || (t.deadline || '').startsWith(f.lbMes))
+  let arr = src.filter((t) => (!f.lbProj || t.project === f.lbProj) && (!f.lbUser || t.usuario === f.lbUser) && (!f.lbMail || t.mail_eleven === f.lbMail) && (!f.lbNeg || t.estado_neg === f.lbNeg) && (!f.lbMes || (t.deadline || '').startsWith(f.lbMes))
     && (f.lbEstado === 'todas' || (f.lbEstado === 'activas' ? !esCerradoLB(t.estado) : f.lbEstado === 'pendientes' ? !esCerradoLB(t.estado) && !PUBLICADOS.has(t.estado) : t.estado === f.lbEstado)));
   if (q) arr = arr.filter((t) => [t.as_code, t.anchor, t.medio, t.mail_eleven, t.contacto_medio, t.url_cliente, t.notas].join(' ').toLowerCase().includes(q));
   sortBy(arr, 'lb', { deadline: (t) => t.deadline || '9999', estado: (t) => ESTADOS_LB.indexOf(t.estado), precio: (t) => Number(t.precio ?? -1), medio: (t) => normDomain(t.medio), as_code: (t) => t.as_code.replace(/\d+$/, (n) => n.padStart(4, '0')) });
-  const base = S.data.lb.filter((t) => !f.lbUser || t.usuario === f.lbUser);
+  const base = src.filter((t) => !f.lbUser || t.usuario === f.lbUser);
   const mails = [...new Set(base.map((t) => t.mail_eleven).filter(Boolean))].sort(), meses = [...new Set(base.map((t) => (t.deadline || '').slice(0, 7)).filter(Boolean))].sort().reverse();
   const estados = [...new Set([...ESTADOS_LB, ...base.map((t) => t.estado)])];
   const sync = S.data.settings.as_sync_at ? `Copiado de AppSheet el ${new Date(Number(S.data.settings.as_sync_at)).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}` : '';
@@ -173,15 +180,15 @@ VIEWS_FN.lb = () => {
     body: `<div class="toolbar wrap">
       <select data-f="lbProj"><option value="">Todos los proyectos</option>${opts(projs('LIN').map((p) => p.code), f.lbProj, projs('LIN').map((p) => `${p.code} · ${p.cliente}`))}</select>
       <select data-f="lbEstado">${opts(['activas', 'pendientes', 'todas', ...estados], f.lbEstado, ['Activas (sin cerradas ni anuladas)', 'Sin publicar', 'Todas', ...estados])}</select>
-      <select data-f="lbUser"><option value="">Todos los asignados</option>${opts(usuarios(S.data.lb), f.lbUser, usuarios(S.data.lb).map((u) => (u === YO ? `${u} (yo)` : u)))}</select>
+      <select data-f="lbUser"><option value="">Todos los asignados</option>${opts(usuarios(src), f.lbUser, usuarios(src).map((u) => (u === YO ? `${u} (yo)` : u)))}</select>
       <select data-f="lbMail"><option value="">Todos los mails de contacto</option>${opts(mails, f.lbMail)}</select>
       <select data-f="lbNeg"><option value="">Toda negociación</option>${opts(ESTADOS_NEG.filter(Boolean), f.lbNeg)}</select>
       <select data-f="lbMes"><option value="">Todos los meses</option>${opts(meses, f.lbMes, meses.map((m) => mesLargo(m)))}</select>
       ${searchBox('lbQ', 'Buscar anchor, medio, mail, código…')}
       <label class="check" style="margin-left:auto"><input type="checkbox" data-f="lbGroup" ${f.lbGroup === '1' ? 'checked' : ''}> Agrupar por proyecto</label></div>
     ${bulkBar('lb', arr)}<div class="card tblwrap"><table class="tbl"><thead><tr>${selAllTh('lb', arr)}${th('lb', 'as_code', 'Código')}${th('lb', 'anchor', 'Anchor')}${th('lb', 'medio', 'Medio')}${th('lb', 'mail_eleven', 'Mail de contacto')}${th('lb', 'estado_neg', 'Negociación')}${th('lb', 'precio', 'Precio', 'num')}${th('lb', 'deadline', 'Mes plan.')}${f.lbUser ? '' : th('lb', 'usuario', 'Asignado')}${th('lb', 'estado', 'Estado')}</tr></thead><tbody>
-      ${agrupar(arr, f.lbUser ? 9 : 10, (x) => { const av = PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? [] : avisosLB(x, proj(x.project), S.data.lb);
-        return `<tr data-open="lb" data-id="${x.id}" class="${S.sel.lb.has(x.id) ? 'selrow' : ''}">${selTd('lb', x.id)}<td class="mono">${x.as_code ? h(x.as_code) : `<span class="tag acc">Nueva · ${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${textoTag('lb', x.id)}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
+      ${agrupar(arr, f.lbUser ? 9 : 10, (x) => { const av = PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? [] : avisosLB(x, proj(x.project), src);
+        return `<tr data-open="lb" data-id="${x.id}" class="${S.sel.lb.has(x.id) ? 'selrow' : ''}">${selTd('lb', x.id)}<td class="mono">${x.as_code ? h(x.as_code) : x.prueba ? '<span class="tag warn">Prueba</span>' : `<span class="tag acc">Nueva · ${h(x.project)}</span>`}</td><td title="${h(x.anchor)}">${h(x.anchor) || '<span class="mute">—</span>'}${textoTag('lb', x.id)}${av.length ? ` <span class="tag warn" title="${h(av.join('\n'))}">${av.length} aviso${av.length > 1 ? 's' : ''}</span>` : ''}</td>
           <td title="${h(x.medio)}">${h(normDomain(x.medio))}</td><td title="${h(x.mail_eleven)}">${h(x.mail_eleven)}</td><td>${h(x.estado_neg)}</td><td class="num nowrap">${x.precio !== null && x.precio !== undefined ? `${h(x.moneda)} ${fmtN(x.precio)}` : ''}</td>
           <td class="nowrap">${PUBLICADOS.has(x.estado) || esCerradoLB(x.estado) ? `<span class="mute">${fmtMes(x.deadline)}</span>` : x.deadline && x.deadline < hoy() ? `<span class="tag bad">${fmtMes(x.deadline)}</span>` : fmtMes(x.deadline)}</td>
           ${f.lbUser ? '' : `<td class="nowrap ${x.usuario === YO ? '' : 'mute'}">${h(x.usuario)}</td>`}
@@ -191,7 +198,7 @@ VIEWS_FN.lb = () => {
 function lbForm(x = {}) {
   const ps = projs('LIN'), p = x.project || S.f.lbProj || ps[0]?.code, pp = proj(p)?.params || {};
   const mails = [...new Set(S.data.lb.map((t) => t.mail_eleven).filter(Boolean))].sort();
-  return `<form id="lbf" data-id="${h(x.id || '')}"><div class="dh"><h2>${x.id ? h(x.as_code || 'Tarea de link building') : 'Nueva tarea de link building'}</h2><button type="button" class="x" data-act="close" title="Cerrar (Esc)">${ic('x')}</button></div>
+  return `<form id="lbf" data-id="${h(x.id || '')}" data-prueba="${x.prueba ? 1 : ''}"><div class="dh"><h2>${x.prueba ? '<span class="tag warn">Prueba</span> ' : ''}${x.id ? h(x.as_code || 'Tarea de link building') : 'Nueva tarea de link building'}</h2><button type="button" class="x" data-act="close" title="Cerrar (Esc)">${ic('x')}</button></div>
     <div class="db">${x.id ? pasoBox(PASOS_LB, x.estado) : ''}<div class="fields">
       <div class="section">Tarea</div>
       <label>Proyecto<select name="project" data-act="lbproj">${opts(ps.map((q) => q.code), p, ps.map((q) => `${q.code} · ${q.cliente}`))}</select></label>
@@ -228,20 +235,21 @@ function lbAvisosVivos() {
 
 // ---------- Redacciones ----------
 VIEWS_FN.red = () => {
+  const src = S.enPruebas ? S.data.redP : S.data.red;
   const f = S.f, q = f.redQ.trim().toLowerCase();
-  let arr = S.data.red.filter((r) => (!f.redProj || r.project === f.redProj) && (!f.redUser || r.usuario === f.redUser) && (f.redEstado === 'todas' || (f.redEstado === 'activas' ? !esCerradoRED(r.estado) : r.estado === f.redEstado)));
+  let arr = src.filter((r) => (!f.redProj || r.project === f.redProj) && (!f.redUser || r.usuario === f.redUser) && (f.redEstado === 'todas' || (f.redEstado === 'activas' ? !esCerradoRED(r.estado) : r.estado === f.redEstado)));
   if (q) arr = arr.filter((r) => [r.as_code, r.tema, r.subproyecto, r.variante, r.notas].join(' ').toLowerCase().includes(q));
   sortBy(arr, 'red', { fecha_entrega: (r) => r.fecha_entrega || '9999', prioridad: (r) => -PRIORIDADES.indexOf(r.prioridad), estado: (r) => ESTADOS_RED.indexOf(r.estado), as_code: (r) => (r.as_code || '~').replace(/\d+$/, (n) => n.padStart(4, '0')) });
   const pendAS = new Set(S.data.as_pend.filter((a) => a.entity === 'red').map((a) => a.ref));
-  const base = S.data.red.filter((r) => !f.redUser || r.usuario === f.redUser), estados = [...new Set([...ESTADOS_RED, ...base.map((r) => r.estado)])];
+  const base = src.filter((r) => !f.redUser || r.usuario === f.redUser), estados = [...new Set([...ESTADOS_RED, ...base.map((r) => r.estado)])];
   return {
     title: 'Redacciones', sub: `${arr.length} redacci${arr.length === 1 ? 'ón' : 'ones'}`, actions: `<button class="btn" data-act="newred">${ic('plus')}Nueva redacción</button>`,
     body: `<div class="toolbar"><select data-f="redProj"><option value="">Todos los proyectos</option>${opts(projs('RED').map((p) => p.code), f.redProj, projs('RED').map((p) => `${p.code} · ${p.cliente}`))}</select>
       <select data-f="redEstado">${opts(['activas', 'todas', ...estados], f.redEstado, ['Activas (sin cerradas)', 'Todas', ...estados])}</select>
-      <select data-f="redUser"><option value="">Todos los asignados</option>${opts(usuarios(S.data.red), f.redUser, usuarios(S.data.red).map((u) => (u === YO ? `${u} (yo)` : u)))}</select>
+      <select data-f="redUser"><option value="">Todos los asignados</option>${opts(usuarios(src), f.redUser, usuarios(src).map((u) => (u === YO ? `${u} (yo)` : u)))}</select>
       ${searchBox('redQ', 'Buscar tema o código…')}<label class="check" style="margin-left:auto"><input type="checkbox" data-f="redGroup" ${f.redGroup === '1' ? 'checked' : ''}> Agrupar por proyecto</label></div>
     ${bulkBar('red', arr)}<div class="card tblwrap"><table class="tbl"><thead><tr>${selAllTh('red', arr)}${th('red', 'as_code', 'Código')}${th('red', 'tema', 'Tema')}${th('red', 'subproyecto', 'Subproyecto')}${th('red', 'prioridad', 'Prioridad')}${th('red', 'fecha_entrega', 'Deadline')}${th('red', 'entregada', 'Entregada')}${f.redUser ? '' : th('red', 'usuario', 'Asignado')}${th('red', 'estado', 'Estado')}</tr></thead><tbody>
-      ${agrupar(arr, f.redUser ? 8 : 9, (r) => `<tr data-open="red" data-id="${r.id}" class="${S.sel.red.has(r.id) ? 'selrow' : ''}">${selTd('red', r.id)}<td class="mono">${r.as_code ? h(r.as_code) : `<span class="tag acc">${pendAS.has(r.id) ? 'Por cargar' : 'Nueva'}</span>`}</td><td title="${h(r.tema)}" style="max-width:340px">${h(r.tema)}${textoTag('red', r.id)}</td><td>${h([r.subproyecto, r.variante].filter(Boolean).join(' · '))}</td>
+      ${agrupar(arr, f.redUser ? 8 : 9, (r) => `<tr data-open="red" data-id="${r.id}" class="${S.sel.red.has(r.id) ? 'selrow' : ''}">${selTd('red', r.id)}<td class="mono">${r.as_code ? h(r.as_code) : `<span class="tag ${r.prueba ? 'warn' : 'acc'}">${r.prueba ? 'Prueba' : pendAS.has(r.id) ? 'Por cargar' : 'Nueva'}</span>`}</td><td title="${h(r.tema)}" style="max-width:340px">${h(r.tema)}${textoTag('red', r.id)}</td><td>${h([r.subproyecto, r.variante].filter(Boolean).join(' · '))}</td>
         <td>${r.prioridad === 'Alta' || r.prioridad === 'Urgente' ? `<span class="tag bad">${h(r.prioridad)}</span>` : r.prioridad === 'Baja' ? '<span class="tag">Baja</span>' : h(r.prioridad)}</td>
         <td>${dlTag(r.fecha_entrega, esCerradoRED(r.estado) || !!r.entregada)}</td><td class="mute">${fmtD(r.entregada)}</td>${f.redUser ? '' : `<td class="nowrap ${r.usuario === YO ? '' : 'mute'}">${h(r.usuario)}</td>`}
         <td><select data-act="redestado" data-id="${r.id}" title="${h(pasoTitle(PASOS_RED, r.estado))}">${estadoOpts(ESTADOS_RED, r.estado)}</select></td></tr>`, f.redGroup) || '<tr><td colspan="9" class="empty">No hay redacciones con estos filtros.</td></tr>'}</tbody></table></div>`,
@@ -249,7 +257,7 @@ VIEWS_FN.red = () => {
 };
 function redForm(r = {}) {
   const ps = projs('RED');
-  return `<form id="redf" data-id="${h(r.id || '')}"><div class="dh"><h2>${r.id ? 'Redacción' : 'Nueva redacción'}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
+  return `<form id="redf" data-id="${h(r.id || '')}" data-prueba="${r.prueba ? 1 : ''}"><div class="dh"><h2>${r.prueba ? '<span class="tag warn">Prueba</span> ' : ''}${r.id ? 'Redacción' : 'Nueva redacción'}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
     <div class="db">${r.id ? pasoBox(PASOS_RED, r.estado) : ''}<p class="small mute" style="margin:0 0 14px">Mismos campos que pide AppSheet en Carga de Redacciones.</p><div class="fields">
       <label class="full">Tema *<input name="tema" required value="${h(r.tema)}"></label>
       <label>Código en AppSheet<input name="as_code" class="mono" placeholder="Se completa al cargarla" value="${h(r.as_code)}"></label>
@@ -370,6 +378,28 @@ VIEWS_FN.ajustes = () => {
     <div class="card"><div class="ch"><h2>Cuenta y datos</h2></div><div class="cb" style="display:flex;gap:8px"><button class="btn sm sec" data-act="export">Descargar mis datos (JSON)</button><button class="btn sm sec" data-act="logout">Cerrar sesión</button></div></div></div>`,
   };
 };
+
+// ---------- Pruebas: tareas que nunca van a AppSheet ----------
+VIEWS_FN.pruebas = () => {
+  const tab = S.f.pruebaTab || 'lb', base = (tab === 'lb' ? VIEWS_FN.lb : VIEWS_FN.red)();
+  return {
+    title: 'Pruebas', sub: `${S.data.lbP.length} links y ${S.data.redP.length} redacciones de prueba · no se mandan a AppSheet ni suman horas`,
+    actions: `<button class="btn" data-act="${tab === 'lb' ? 'newlbP' : 'newredP'}">${ic('plus')}${tab === 'lb' ? 'Link de prueba' : 'Redacción de prueba'}</button>`,
+    body: `<div class="alert" style="margin:0 0 14px;background:var(--warn-bg);border-color:#fedf89"><b>Modo prueba.</b> Podés crear tareas, cambiar estados (también en lote), redactar con IA y generar imágenes: nada de esto se anota en Para AppSheet ni se cuenta en Horas.
+      Para probar el pegado en un documento, creá un Google Doc tuyo y pegá su link en el campo "Documento de la tarea" del editor.</div>
+      ${tabs('pruebaTab', [['lb', `Links (${S.data.lbP.length})`], ['red', `Redacciones (${S.data.redP.length})`]])}${base.body}`,
+  };
+};
+/** Huella de la versión de la app (cambia con cada despliegue). */
+async function versionApp() { try { const t = await Promise.all(['/app.js', '/shared.js', '/style.css'].map((u) => fetch(u, { cache: 'no-store' }).then((r) => r.text()))); let x = 0; for (const c of t.join('')) x = (x * 31 + c.charCodeAt(0)) | 0; return x; } catch { return null; } }
+async function actualizarTodo() {
+  toast('Actualizando…'); S.medios = null; S.plan = null; S.iaEstado = null;
+  try { await (await navigator.serviceWorker?.getRegistration())?.update(); } catch { /* sin service worker */ }
+  await load();
+  const v = await versionApp();
+  if (v && S.version && v !== S.version) { toast('Hay una versión nueva de la app: recargando…'); setTimeout(() => location.reload(), 800); return; }
+  toast('Actualizado');
+}
 
 // ---------- Medios: compilado + mis contactos ----------
 async function cargarMedios(force) { if (S.medios && !force) return S.medios; S.medios = await api('/api/medios'); return S.medios; }
@@ -573,7 +603,7 @@ setInterval(() => {
   if (!S.token || document.visibilityState !== 'visible' || Date.now() - ultimoInput > 5 * 60_000) return;
   const refs = focoActual(); if (!refs.length) return;
   api('/api/act/ping', 'POST', { refs }).catch(() => {});
-  S.focoTxt = refs.length === 1 ? (S.data[refs[0].kind].find((x) => x.id === refs[0].ref)?.as_code || S.data[refs[0].kind].find((x) => x.id === refs[0].ref)?.project || '') : `${refs.length} tareas`;
+  S.focoTxt = refs.length === 1 ? (tarea(refs[0].kind, refs[0].ref)?.as_code || tarea(refs[0].kind, refs[0].ref)?.project || '') : `${refs.length} tareas`;
   S.focoAt = Date.now(); renderTimer();
   if (++S.pings % 6 === 0 && !$('#drawer').classList.contains('open')) load();
 }, 30_000);
@@ -590,7 +620,7 @@ function renderTimer() {
 // ---------- editor de redacción ----------
 const contar = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
 async function abrirRedaccion(kind, id) {
-  const x = S.data[kind].find((o) => o.id === id), t = await api(`/api/texto?kind=${kind}&ref=${encodeURIComponent(id)}`), min = kind === 'lb' ? proj(x.project)?.params?.palabrasMin : null;
+  const x = tarea(kind, id), t = await api(`/api/texto?kind=${kind}&ref=${encodeURIComponent(id)}`), min = kind === 'lb' ? proj(x.project)?.params?.palabrasMin : null;
   const titulo = kind === 'lb' ? `${x.as_code || x.project} · ${x.anchor || 'sin anchor'}` : `${x.as_code || x.project} · ${x.tema}`, st = S.data.settings;
   const tienePrompt = (S.data.prompts || []).some((p) => p.project === x.project && p.texto.trim());
   openDrawer(`<form id="txf" data-kind="${kind}" data-id="${h(id)}" data-min="${h(min ?? '')}"><div class="dh"><h2>Redacción — ${h(titulo)}</h2><button type="button" class="x" data-act="close">${ic('x')}</button></div>
@@ -628,7 +658,7 @@ async function iaRedactarUI(el) {
 }
 /** Links: texto + imagen con un clic y, si la tarea está en un estado editable, se pega directo en el documento de AppSheet. */
 async function iaTodoUI(el) {
-  const f = $('#txf'), x = S.data.lb.find((o) => o.id === f.dataset.id); if (f.cuerpo.value.trim() && !confirm('Ya hay texto. ¿Reemplazarlo por uno nuevo de la IA?')) return;
+  const f = $('#txf'), x = tarea('lb', f.dataset.id); if (f.cuerpo.value.trim() && !confirm('Ya hay texto. ¿Reemplazarlo por uno nuevo de la IA?')) return;
   const st = (t) => { $('#iastat').textContent = t; }; el.disabled = true;
   try {
     st('1/3 Redactando…'); const r = await api('/api/ia/redactar', 'POST', { kind: 'lb', ref: f.dataset.id }); f.titulo.value = r.titulo; f.cuerpo.value = r.cuerpo; contarVivo();
@@ -671,11 +701,14 @@ document.addEventListener('click', async (ev) => {
   const sortTh = ev.target.closest('th[data-sort]');
   if (sortTh) { const v = sortTh.dataset.sv, k = sortTh.dataset.sort, cur = S.sort[v]; S.sort[v] = [k, cur[0] === k ? -cur[1] : 1]; return render(); }
   const row = ev.target.closest('tr[data-open]');
-  if (row && !ev.target.closest('select,button,input,td.ck,a')) { const k = row.dataset.open, x = S.data[k].find((o) => o.id === row.dataset.id); return openDrawer({ lb: lbForm, red: redForm, hours: hoursForm }[k](x)); }
+  if (row && !ev.target.closest('select,button,input,td.ck,a')) { const k = row.dataset.open, x = k === 'hours' ? S.data.hours.find((o) => o.id === row.dataset.id) : tarea(k, row.dataset.id); return openDrawer({ lb: lbForm, red: redForm, hours: hoursForm }[k](x)); }
   const el = ev.target.closest('[data-act]'); if (!el || el.tagName === 'SELECT') return;
   switch (el.dataset.act) {
     case 'view': ev.preventDefault(); closeDrawer(); if (el.dataset.v === 'ia') S.iaEstado = null; S.view = el.dataset.v; localStorage.setItem('pe_view', S.view); if (S.view === 'ajustes') loadCal(); $('#view') && ($('#view').scrollTop = 0); render(); break;
     case 'newlb': openDrawer(lbForm()); break;
+    case 'newlbP': openDrawer(lbForm({ prueba: 1, usuario: YO, estado: 'Gestión de Backlink' })); break;
+    case 'newredP': openDrawer(redForm({ prueba: 1, usuario: YO })); break;
+    case 'actualizar': await actualizarTodo(); break;
     case 'newred': openDrawer(redForm()); break;
     case 'newhours': openDrawer(hoursForm()); break;
     case 'editplan': openDrawer(planForm()); break;
@@ -724,8 +757,8 @@ document.addEventListener('change', async (ev) => {
   if (el.id === 'medcsv' && el.files[0]) { importarCompilado(el.files[0]).catch((e) => toast(e.message)); return; }
   if (el.dataset.f && el.type !== 'search') { S.f[el.dataset.f] = el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value; render(); return; }
   if (el.dataset.act === 'lbestado' || el.dataset.act === 'redestado') {
-    const kind = el.dataset.act === 'lbestado' ? 'lb' : 'red', x = S.data[kind].find((o) => o.id === el.dataset.id);
-    try { await api('/api/' + kind, 'POST', { ...x, estado: el.value }); toast('Estado actualizado · anotado en Pendientes AppSheet'); await load(); } catch (e) { toast(e.message); el.value = x.estado; }
+    const kind = el.dataset.act === 'lbestado' ? 'lb' : 'red', x = tarea(kind, el.dataset.id);
+    try { await api('/api/' + kind, 'POST', { ...x, estado: el.value }); toast(x.prueba ? 'Estado actualizado (prueba: no va a AppSheet)' : 'Estado actualizado · anotado en Pendientes AppSheet'); await load(); } catch (e) { toast(e.message); el.value = x.estado; }
     return;
   }
   if (el.dataset.act === 'hrproj') { el.form.task_type.innerHTML = opts(TAREAS[proj(el.value).tipo]); return; }
@@ -745,8 +778,8 @@ document.addEventListener('submit', async (ev) => {
     catch (e) { $('#lerr').textContent = e.message; }
     return;
   }
-  if (f.id === 'lbf') return guardar(() => api('/api/lb', 'POST', { ...formData(f), id: f.dataset.id || undefined }), 'Tarea guardada');
-  if (f.id === 'redf') return guardar(() => { const d = formData(f); return api('/api/red', 'POST', { ...d, ia: d.ia === '1', id: f.dataset.id || undefined }); }, 'Redacción guardada');
+  if (f.id === 'lbf') return guardar(() => api('/api/lb', 'POST', { ...formData(f), id: f.dataset.id || undefined, prueba: !!f.dataset.prueba }), f.dataset.prueba ? 'Tarea de prueba guardada (no va a AppSheet)' : 'Tarea guardada');
+  if (f.id === 'redf') return guardar(() => { const d = formData(f); return api('/api/red', 'POST', { ...d, ia: d.ia === '1', id: f.dataset.id || undefined, prueba: !!f.dataset.prueba }); }, f.dataset.prueba ? 'Redacción de prueba guardada (no va a AppSheet)' : 'Redacción guardada');
   if (f.id === 'txf') return guardar(() => api('/api/texto', 'POST', { kind: f.dataset.kind, ref: f.dataset.id, titulo: f.titulo.value, cuerpo: f.cuerpo.value, url: f.url.value, lista: f.lista.checked }), 'Redacción guardada');
   if (f.id === 'notaf') { try { await api('/api/notas', 'POST', { texto: f.texto.value, lider: f.lider.checked }); await load(); } catch (e) { toast(e.message); } return; }
   if (f.id === 'gemf') { try { const r = await api('/api/ia/key', 'POST', { key: f.key.value.trim() }); S.iaEstado = null; toast(`Gemini conectado · textos: ${r.texto || '—'} · imágenes: ${r.imagen || '—'}`); await load(); } catch (e) { toast(e.message); } return; }
@@ -784,10 +817,11 @@ async function enablePush() {
 
 // ---------- arranque ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+versionApp().then((v) => { S.version = v; });
 const qs = new URLSearchParams(location.search);
 (async () => {
   if (S.token) {
-    try { S.data = JSON.parse(localStorage.getItem('pe_cache') || 'null'); } catch { /* nada */ }
+    try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); } catch { /* nada */ }
     if (S.data) render(); if (S.view === 'ajustes') loadCal(); await load();
     const n = qs.get('nuevo'); if (n === 'lb') openDrawer(lbForm()); else if (n === 'red') openDrawer(redForm()); else if (n === 'horas') openDrawer(hoursForm());
     if (n) history.replaceState(null, '', '/');

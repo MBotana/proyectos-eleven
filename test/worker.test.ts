@@ -231,3 +231,18 @@ test('tipo de pieza de Alicante según el tema', async () => {
   assert.equal(tipoPieza({ tema: 'Chow fan (arroz frito)' }), 'Recetas CC');
   assert.equal(tipoPieza({ tema: 'x', subproyecto: 'Portal Omint' }), 'Portal Omint');
 });
+
+test('tareas de prueba: no van a AppSheet ni suman horas', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1' })).j.token;
+  const id = (await call(env, '/api/lb', 'POST', { project: 'NAV-LIN-5', anchor: 'prueba', estado: 'Gestión de Backlink', prueba: true }, tok)).j.id;
+  const rid = (await call(env, '/api/red', 'POST', { project: 'LAV-RED-5', tema: 'Chow fan', prueba: true }, tok)).j.id;
+  let d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  await call(env, '/api/lb', 'POST', { ...d.lb.find((t: any) => t.id === id), estado: 'Para Enviar' }, tok);
+  await call(env, '/api/bulk', 'POST', { kind: 'red', ids: [rid], estado: 'Entrega' }, tok);
+  await call(env, '/api/texto', 'POST', { kind: 'lb', ref: id, cuerpo: 'hola', lista: true }, tok);
+  await call(env, '/api/lb/' + id, 'DELETE', undefined, tok);
+  d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.as_pend.length, 0, 'nada para AppSheet');
+  assert.equal(d.red.find((r: any) => r.id === rid).prueba, 1);
+  assert.equal(d.hours.filter((h: any) => h.auto).length, 0, 'sin horas automáticas');
+});
