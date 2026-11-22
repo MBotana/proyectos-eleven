@@ -53,6 +53,7 @@ export const MIGRATIONS = [
   `ALTER TABLE sessions ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
   `CREATE INDEX IF NOT EXISTS lb_uid ON lb_tasks (uid)`,
   `CREATE INDEX IF NOT EXISTS red_uid ON redacciones (uid)`,
+  `ALTER TABLE users ADD COLUMN modo TEXT NOT NULL DEFAULT 'tecnico'`,
 ];
 
 /** Tablas que pasan a tener clave por usuario (se reconstruyen una vez). */

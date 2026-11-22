@@ -243,7 +243,8 @@ export function planificar({ projects, medios, lb, plan, month, hoy = hoyEn() })
 }
 
 // ======================= Alertas, notas y sugerencias =======================
-const LIDER_RE = /REQUIERE ESQUEMA PRECIOS|Sin Pago|Revisión y Validación/i;
+const LIDER_RE = /Sin Pago|Revisión y Validación/i;
+const ESQUEMA_RE = /REQUIERE ESQUEMA PRECIOS/i;
 /**
  * Alertas de tus tareas: qué hablar con el líder, tareas quietas hace mucho, links publicados sin pagar,
  * problemas de indexación y avisos que muestra AppSheet. Devuelve { lider, quietas, impagas, indexacion, appsheet, sugerencias }.
@@ -253,10 +254,14 @@ export function alertas({ lb, red, projects }, { hoy = hoyEn(), diasQuieta = 14,
   const P = (c) => projects.find((p) => p.code === c);
   const out = { lider: [], quietas: [], impagas: [], indexacion: [], appsheet: [], sugerencias: [] };
   const lim = Date.parse(hoy) - diasQuieta * 864e5;
+  // "requiere esquema de precios" es del proyecto, no de cada tarea: una sola alerta por proyecto
+  const esquema = {};
+  const marcaEsquema = (t, kind) => { const e = (esquema[t.project] ||= { kind: 'proyecto', id: t.project, code: t.project, project: t.project, titulo: P(t.project)?.cliente || '', n: 0, estados: new Set() }); e.n++; e.estados.add(t.estado.replace(/\s*-\s*REQUIERE ESQUEMA PRECIOS/i, '')); };
   for (const t of mias) {
     if (esCerradoLB(t.estado)) continue;
     const it = { kind: 'lb', id: t.id, code: t.as_code || t.project, project: t.project, estado: t.estado, titulo: t.anchor || normDomain(t.medio) };
-    if (LIDER_RE.test(t.estado)) out.lider.push({ ...it, motivo: t.estado });
+    if (ESQUEMA_RE.test(t.estado)) marcaEsquema(t, 'lb');
+    else if (LIDER_RE.test(t.estado)) out.lider.push({ ...it, motivo: t.estado });
     else { const av = esPublicado(t.estado) ? [] : avisosLB(t, P(t.project), lb).filter((a) => /líder/.test(a)); if (av.length) out.lider.push({ ...it, motivo: av[0] }); }
     if (t.estado === 'Backlink Publicado - MANUAL_INDEX' || /indexaci/i.test(t.as_aviso || '')) out.indexacion.push({ ...it, motivo: t.as_aviso || 'Publicado con indexación manual: revisar que Google la indexe' });
     if (esPublicado(t.estado) && t.estado !== 'Cerrado' && t.pago_estado && !/^pagad/i.test(t.pago_estado) && !/exim/i.test(t.pago_estado)) out.impagas.push({ ...it, motivo: `Pago "${t.pago_estado}"${t.precio ? ` · ${t.moneda} ${t.precio}` : ''}` });
@@ -266,11 +271,13 @@ export function alertas({ lb, red, projects }, { hoy = hoyEn(), diasQuieta = 14,
   for (const r of miasR) {
     if (esCerradoRED(r.estado)) continue;
     const it = { kind: 'red', id: r.id, code: r.as_code || r.project, project: r.project, estado: r.estado, titulo: r.tema };
-    if (LIDER_RE.test(r.estado)) out.lider.push({ ...it, motivo: r.estado });
+    if (ESQUEMA_RE.test(r.estado)) marcaEsquema(r, 'red');
+    else if (LIDER_RE.test(r.estado)) out.lider.push({ ...it, motivo: r.estado });
     if (r.as_aviso) out.appsheet.push({ ...it, motivo: r.as_aviso });
     if (r.estado_at && r.estado_at < lim) out.quietas.push({ ...it, motivo: `${Math.floor((Date.parse(hoy) - r.estado_at) / 864e5)} días en "${r.estado}"`, dias: Math.floor((Date.parse(hoy) - r.estado_at) / 864e5) });
   }
   out.quietas.sort((a, b) => b.dias - a.dias);
+  out.lider.unshift(...Object.values(esquema).map((e) => ({ kind: e.kind, id: e.id, code: e.code, project: e.project, titulo: e.titulo, motivo: `El proyecto requiere esquema de precios · ${e.n} tarea${e.n > 1 ? 's' : ''} frenada${e.n > 1 ? 's' : ''} (${[...e.estados].join(', ')})` })));
   // sugerencias: trabajo por acción
   const porMail = {};
   for (const t of mias.filter((t) => t.estado === 'Para Enviar')) (porMail[t.mail_eleven || '(sin mail)'] ||= []).push(t);
@@ -294,3 +301,38 @@ export function tipoHoras(kind, t, planMes = []) {
   return delProy.length && !delProy.includes(tipo) ? delProy[0] : tipo;
 }
 export const QUIEN = { yo: 'Vos', ia: 'IA (Gemini)', claude: 'Claude', sync: 'Sincronización AppSheet' };
+
+// ======================= Modo líder =======================
+/** Semáforo de una tarea: ok = terminada, warn = vence en 7 días o menos, bad = vencida o con problema de indexación, '' = en curso. */
+export function semaforo(kind, t, hoy = hoyEn()) {
+  if (kind === 'lb') {
+    if (t.estado === 'Anulado') return { c: 'off', txt: 'Anulada' };
+    if (t.estado === 'Backlink Publicado - MANUAL_INDEX' || /indexaci/i.test(t.as_aviso || '')) return { c: 'bad', txt: 'Problema de indexación' };
+    if (esPublicado(t.estado)) return { c: 'ok', txt: 'Publicado' };
+    const d = t.deadline;
+    if (d && d < hoy) return { c: 'bad', txt: 'Vencida' };
+    if (d && d <= addDays(hoy, 7)) return { c: 'warn', txt: 'Por vencer' };
+    return { c: '', txt: 'En curso' };
+  }
+  if (t.estado === 'Anulado') return { c: 'off', txt: 'Anulada' };
+  if (t.estado === 'Cerrado' || t.entregada) return { c: 'ok', txt: 'Entregada' };
+  const d = t.fecha_entrega;
+  if (d && d < hoy) return { c: 'bad', txt: 'Vencida' };
+  if (d && d <= addDays(hoy, 7)) return { c: 'warn', txt: 'Por vencer' };
+  return { c: '', txt: 'En curso' };
+}
+/** Números de un proyecto en un mes para el líder: avance, semáforo y presupuesto. */
+export function resumenProyecto(p, { lb, red }, mes, hoy = hoyEn()) {
+  const lin = p.tipo === 'LIN', arr = (lin ? lb : red).filter((t) => t.project === p.code && !t.prueba);
+  const delMes = arr.filter((t) => (lin ? t.deadline : t.fecha_entrega || '').startsWith(mes) && t.estado !== 'Anulado');
+  const cuenta = { ok: 0, warn: 0, bad: 0, '': 0 };
+  for (const t of delMes) { const c = semaforo(lin ? 'lb' : 'red', t, hoy).c; if (c in cuenta) cuenta[c]++; }
+  const abiertasViejas = arr.filter((t) => !delMes.includes(t) && semaforo(lin ? 'lb' : 'red', t, hoy).c === 'bad').length;
+  const c = (p.params?.costos || {})[mes];
+  const tope = c ? num(c.tope) : null, gastado = c ? num(c.gastado) || 0 : null;
+  return {
+    code: p.code, cliente: p.cliente, tipo: p.tipo, total: delMes.length, terminadas: cuenta.ok, porVencer: cuenta.warn, vencidas: cuenta.bad, enCurso: cuenta[''],
+    objetivo: lin ? num(p.params?.linksMes) : null, atrasadasDeOtrosMeses: abiertasViejas,
+    tope, gastado, pctPresupuesto: tope ? Math.round((gastado / tope) * 100) : null,
+  };
+}

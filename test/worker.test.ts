@@ -202,7 +202,8 @@ test('alertas: líder, quietas, impagas e indexación', () => {
   ];
   const projects = PROYECTOS_INICIALES.map((p: any) => ({ ...p, active: 1 }));
   const a = alertas({ lb, red: [], projects }, { hoy, diasQuieta: 14 });
-  assert.deepEqual(a.lider.map((x: any) => x.id).sort(), ['1', '4']);
+  assert.deepEqual(a.lider.map((x: any) => x.id).sort(), ['4', 'NAV-LIN-5']);
+  assert.match(a.lider.find((x: any) => x.kind === 'proyecto').motivo, /requiere esquema de precios · 1 tarea/);
   assert.deepEqual(a.impagas.map((x: any) => x.id), ['2']);
   assert.deepEqual(a.indexacion.map((x: any) => x.id), ['3']);
   assert.deepEqual(a.quietas.map((x: any) => x.id), ['4'], 'solo las mías');
@@ -263,6 +264,9 @@ test('varios usuarios: invitación, datos separados y carga desde AppSheet', asy
   let df = (await call(env, '/api/data', 'GET', undefined, tf)).j;
   assert.equal(df.me.nombre, 'Franco Mercado'); assert.equal(df.lb.length, 0); assert.equal(df.projects.length, 0); assert.equal(df.prompts.length, 0);
   assert.equal((await call(env, '/api/invites', 'POST', {}, tf)).status, 403);
+  assert.equal((await call(env, '/api/usuarios/modo', 'POST', { id: 'u1', modo: 'lider' }, tf)).status, 403);
+  await call(env, '/api/usuarios/modo', 'POST', { id: df.me.id, modo: 'lider' }, tok);
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tf)).j.me.modo, 'lider', 'el admin le elige el modo');
   // carga desde AppSheet con su clave: crea sus proyectos (copiando parámetros y prompts) y no pisa las tareas de Martín
   const key = (await call(env, '/api/import-key', 'GET', undefined, tf)).j.key;
   const lb = [['TEL-LIN-2-164', '30/11/2026', 'Intervalo métrica 21-40', 'Backlink Publicado', 'Honor X5c', 'inneuquen.info', 'Acuerdo Vencido', 'USD', '$160.00', '19/11/2026', 'Franco Mercado', 'natalia@x'],
@@ -298,4 +302,18 @@ test('migración: la cuenta única de antes pasa a ser el usuario 1', async () =
   const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
   assert.equal(d.me.id, 'u1'); assert.equal(d.me.admin, 1); assert.equal(d.settings.gemini, '1', 'conserva su clave de Gemini');
   assert.equal((await call(env, '/cal/token-de-calendario-largo-123.ics')).status, 200, 'conserva su calendario');
+});
+
+test('modo líder: semáforo y resumen por proyecto', async () => {
+  const { semaforo, resumenProyecto } = await import('../public/shared.js');
+  const hoy = '2026-11-22';
+  assert.equal(semaforo('lb', { estado: 'Backlink Publicado', deadline: '2026-11-30' }, hoy).c, 'ok');
+  assert.equal(semaforo('lb', { estado: 'Backlink Publicado - MANUAL_INDEX' }, hoy).c, 'bad');
+  assert.equal(semaforo('lb', { estado: 'Gestión de Backlink', deadline: '2026-11-25' }, hoy).c, 'warn');
+  assert.equal(semaforo('lb', { estado: 'Para Enviar', deadline: '2026-10-31' }, hoy).c, 'bad');
+  assert.equal(semaforo('red', { estado: 'Entrega', entregada: '2026-11-02' }, hoy).c, 'ok');
+  const p = { code: 'NAV-LIN-5', cliente: 'Nave', tipo: 'LIN', params: { linksMes: 11, costos: { '2026-11': { gastado: 300, tope: 1000 } } } };
+  const lb = [{ project: 'NAV-LIN-5', estado: 'Backlink Publicado', deadline: '2026-11-30' }, { project: 'NAV-LIN-5', estado: 'Para Enviar', deadline: '2026-11-25' }, { project: 'NAV-LIN-5', estado: 'Gestión de Backlink', deadline: '2026-10-31' }];
+  const r = resumenProyecto(p, { lb, red: [] }, '2026-11', hoy);
+  assert.deepEqual([r.total, r.terminadas, r.porVencer, r.atrasadasDeOtrosMeses, r.pctPresupuesto, r.objetivo], [2, 1, 1, 1, 30, 11]);
 });

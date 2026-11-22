@@ -7,7 +7,7 @@ import { PROMPTS_INICIALES, PROMPTS_VERSION } from './prompts.ts';
 import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays, tipoHoras, QUIEN, DOC_EDITABLE_LB } from '../public/shared.js';
 
 /** Usuario de la sesión (cada uno ve solo lo suyo). */
-export interface User { id: string; nombre: string; email: string; admin: number }
+export interface User { id: string; nombre: string; email: string; admin: number; modo?: string }
 export interface Env { DB: any; ASSETS?: any; U?: User }
 const uidOf = (env: Env) => { if (!env.U) throw Object.assign(new Error('Sin usuario'), { status: 401 }); return env.U.id; };
 const yoOf = (env: Env) => env.U?.nombre || YO;
@@ -102,8 +102,8 @@ async function userBySetting(env: Env, key: string, value: string): Promise<User
   return r ? userById(env, String(r.key).split(':')[0]) : null;
 }
 async function userById(env: Env, id: string): Promise<User | null> {
-  const u: any = await env.DB.prepare('SELECT id, nombre, email, admin FROM users WHERE id = ?').bind(id).first();
-  return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin) } : null;
+  const u: any = await env.DB.prepare('SELECT id, nombre, email, admin, modo FROM users WHERE id = ?').bind(id).first();
+  return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico' } : null;
 }
 export const conUsuario = (env: Env, U: User): Env => ({ ...env, U });
 const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '' };
@@ -595,7 +595,7 @@ async function allData(env: Env) {
   const auto = await horasAuto(env, desde);
   return {
     projects,
-    me: env.U, usuarios: env.U?.admin ? ((await env.DB.prepare('SELECT id, nombre, email, admin, created_at FROM users ORDER BY created_at').all()).results) : [],
+    me: env.U, usuarios: env.U?.admin ? ((await env.DB.prepare('SELECT id, nombre, email, admin, modo, created_at FROM users ORDER BY created_at').all()).results) : [],
     lb: await q('SELECT * FROM lb_tasks WHERE uid = ? ORDER BY CASE WHEN deadline = \'\' THEN 1 ELSE 0 END, deadline, created_at'),
     red: await q('SELECT * FROM redacciones WHERE uid = ? ORDER BY CASE WHEN fecha_entrega = \'\' THEN 1 ELSE 0 END, fecha_entrega, created_at'),
     hours: [...auto, ...(await q('SELECT * FROM hours WHERE uid = ? ORDER BY date DESC, created_at DESC')) as any[]].sort((a, b) => b.date.localeCompare(a.date)),
@@ -690,6 +690,13 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const token = b64u(rand(18));
       await env.DB.prepare('INSERT INTO invites (token, created_by, created_at) VALUES (?, ?, ?)').bind(token, U.id, Date.now()).run();
       return json({ token, link: `${url.origin}/?invitacion=${token}` });
+    }
+    // modo predeterminado de cada usuario (Líder o Técnico): lo elige quien administra
+    if (path === '/api/usuarios/modo' && m === 'POST') {
+      if (!U.admin) return fail('Solo quien administra la app puede cambiarlo', 403);
+      const b = await body();
+      await env.DB.prepare('UPDATE users SET modo = ? WHERE id = ?').bind(oneOf(b.modo, ['lider', 'tecnico'], 'tecnico'), str(b.id, 40)).run();
+      return json({ ok: true });
     }
     if (path === '/api/import-key' && m === 'GET') {
       let k = await getS(env, 'import_key'); if (!k || url.searchParams.get('nueva')) { k = b64u(rand(24)); await putS(env, 'import_key', k); }

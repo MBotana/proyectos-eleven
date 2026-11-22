@@ -1,5 +1,5 @@
 // Proyectos Eleven — app de escritorio (PWA instalable desde Chrome o Edge). Un solo usuario; todo se guarda en el servidor.
-import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO as YO_DEF, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain, compiladoAMedios, aptoMedio, planificar, alertas, QUIEN, DOC_EDITABLE_LB } from './shared.js';
+import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO as YO_DEF, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain, compiladoAMedios, aptoMedio, planificar, alertas, QUIEN, DOC_EDITABLE_LB, semaforo, resumenProyecto } from './shared.js';
 
 /** Tu nombre en AppSheet (cada usuario ve sus tareas); se toma de la sesión al cargar. */
 let YO = YO_DEF;
@@ -38,6 +38,7 @@ const IC = {
   img: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>', doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>',
   play: '<path d="M7 4v16l13-8z"/>', stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>', copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
 };
+Object.assign(IC, { tablero: IC.inicio, lproyectos: IC.proyectos, lalertas: IC.alertas });
 const ic = (k) => `<svg class="i" viewBox="0 0 24 24">${IC[k]}</svg>`;
 
 async function api(path, method = 'GET', body) {
@@ -81,12 +82,19 @@ function render() {
   if (!S.data) { $('#app').innerHTML = '<div class="login"><div class="mute">Cargando…</div></div>'; return; }
   if (!$('#shell')) $('#app').innerHTML = `<div id="shell"><aside id="side"><div class="brand"><img src="/icon.svg" alt=""><div><b>Proyectos Eleven</b><small>Link building · Contenido</small></div></div><nav id="nav"></nav><div id="sidetimer"></div></aside><section id="main"><header id="head"></header><div id="view"></div></section></div>`;
   const al = misAlertas(), counts = { lb: S.data.lb.filter((t) => t.usuario === YO && !esCerradoLB(t.estado)).length, red: S.data.red.filter((r) => r.usuario === YO && !esCerradoRED(r.estado)).length, appsheet: S.data.as_pend.length, alertas: al.lider.length + al.impagas.length + al.indexacion.length };
-  $('#nav').innerHTML = VIEWS.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count${k === 'alertas' ? ' hotc' : ''}">${counts[k]}</span>` : ''}</button>`)).join('');
+  const modo = modoActual(), vistas = modo === 'lider' ? VIEWS_LIDER : VIEWS;
+  if (!vistas.some(([k]) => k === S.view)) S.view = vistas[0][0];
+  $('#nav').innerHTML = vistas.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count${k === 'alertas' ? ' hotc' : ''}">${counts[k]}</span>` : ''}</button>`)).join('');
   S.enPruebas = S.view === 'pruebas';
   const v = VIEWS_FN[S.view] || VIEWS_FN.inicio, out = v();
   $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}<button class="btn sec" data-act="actualizar" title="Trae los últimos cambios (los míos y los tuyos) y la última versión de la app">${ic('refresh')}Actualizar</button></div>`;
   const keep = $('#view').scrollTop; $('#view').innerHTML = out.body; $('#view').scrollTop = keep;
-  renderTimer();
+  if (modo === 'lider') renderModo(); else renderTimer();
+}
+/** Selector de modo en la barra lateral (cada uno puede alternar; el predeterminado lo elige quien administra). */
+function renderModo() {
+  const el = $('#sidetimer'); if (!el) return; const m = modoActual();
+  el.innerHTML = `<div class="lbl">Modo</div><div class="seg2"><button class="${m === 'tecnico' ? 'on' : ''}" data-act="modo" data-v="tecnico">Técnico</button><button class="${m === 'lider' ? 'on' : ''}" data-act="modo" data-v="lider">Líder</button></div>`;
 }
 function renderLogin() {
   const alta = S.setup || S.invitacion;
@@ -389,9 +397,9 @@ VIEWS_FN.ajustes = () => {
       <ol class="steps" style="margin-top:0"><li>Mostrá la barra de favoritos del navegador (Ctrl+Mayús+B).</li><li>Arrastrá este botón a la barra: <a class="btn sm" id="bmk" href="#" draggable="true" onclick="return false" title="Arrastralo a la barra de favoritos">↧ Traer de AppSheet</a></li><li>Abrí AppSheet (Eleven - Operaciones) y tocá el favorito. Lee tus links y redacciones (tarda 1 o 2 minutos) y los manda a tu cuenta. Después tocá <b>Actualizar</b> acá.</li></ol>
       <p class="small mute">Repetilo cuando quieras traer lo último. El botón tiene una clave tuya: no lo compartas. <button class="lnk small" data-act="bmknuevo">Generar una clave nueva</button></p></div></div>
     ${S.data.me?.admin ? `<div class="card"><div class="ch"><h2>Usuarios</h2><span class="sub">${S.data.usuarios.length}</span></div><div class="cb">
-      <table class="tbl" style="margin-bottom:12px"><tbody>${S.data.usuarios.map((u) => `<tr><td>${h(u.nombre)}${u.admin ? ' <span class="tag">admin</span>' : ''}</td><td class="mute">${h(u.email)}</td><td class="mute small">${new Date(u.created_at).toLocaleDateString('es-AR')}</td></tr>`).join('')}</tbody></table>
+      <table class="tbl" style="margin-bottom:12px"><tbody><tr><th>Nombre</th><th>Mail</th><th>Modo predeterminado</th><th>Desde</th></tr>${S.data.usuarios.map((u) => `<tr><td>${h(u.nombre)}${u.admin ? ' <span class="tag">admin</span>' : ''}</td><td class="mute">${h(u.email)}</td><td><select class="umodo" data-id="${h(u.id)}" style="width:auto;height:28px">${opts(['tecnico', 'lider'], u.modo || 'tecnico', ['Técnico', 'Líder'])}</select></td><td class="mute small">${new Date(u.created_at).toLocaleDateString('es-AR')}</td></tr>`).join('')}</tbody></table>
       <button class="btn sm" data-act="invitar">Invitar a alguien</button><code class="url" id="invlink" style="margin-top:10px;display:none"></code>
-      <p class="small mute">El link sirve para una sola cuenta. Cada persona ve solo sus tareas, horas, prompts y claves.</p></div></div>` : ''}
+      <p class="small mute">El link sirve para una sola cuenta. Cada persona ve solo sus tareas, horas, prompts y claves. El modo predeterminado es con el que abre la app; cada uno puede alternar entre Técnico y Líder desde la barra lateral.</p></div></div>` : ''}
     <div class="card"><div class="ch"><h2>Cuenta y datos</h2><span class="sub">${h(S.data.me?.nombre || '')} · ${h(S.data.me?.email || '')}</span></div><div class="cb" style="display:flex;gap:8px"><button class="btn sm sec" data-act="export">Descargar mis datos (JSON)</button><button class="btn sm sec" data-act="logout">Cerrar sesión</button></div></div></div>`,
   };
 };
@@ -417,6 +425,98 @@ async function actualizarTodo() {
   if (v && S.version && v !== S.version) { toast('Hay una versión nueva de la app: recargando…'); setTimeout(() => location.reload(), 800); return; }
   toast('Actualizado');
 }
+
+// ======================= Modo líder (solo lectura, por proyecto) =======================
+const VIEWS_LIDER = [['tablero', 'Tablero'], ['lproyectos', 'Proyectos'], ['lalertas', 'Para revisar'], ['sep'], ['ajustes', 'Ajustes']];
+const modoActual = () => (S.data?.me ? localStorage.getItem('pe_modo_' + S.data.me.id) || S.data.me.modo || 'tecnico' : 'tecnico');
+const SEM_TXT = { ok: 'Terminada', warn: 'Por vencer', bad: 'Vencida o con problema', '': 'En curso', off: 'Anulada' };
+const semDot = (c, t) => `<span class="sem sem-${c || 'run'}" title="${h(t || SEM_TXT[c])}"></span>`;
+const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+function barraSemaforo(r) {
+  const tot = r.terminadas + r.porVencer + r.vencidas + r.enCurso;
+  if (!tot) return '<div class="small mute">Sin tareas planificadas este mes</div>';
+  const seg = (n, c, t) => (n ? `<i class="seg sem-${c}" style="flex:${n}" title="${t}: ${n}"></i>` : '');
+  return `<div class="stack">${seg(r.terminadas, 'ok', 'Terminadas')}${seg(r.enCurso, 'run', 'En curso')}${seg(r.porVencer, 'warn', 'Por vencer')}${seg(r.vencidas, 'bad', 'Vencidas o con problema')}</div>`;
+}
+function medidorPresupuesto(r) {
+  if (r.pctPresupuesto === null) return '';
+  const c = r.pctPresupuesto > 100 ? 'bad' : r.pctPresupuesto >= 90 ? 'warn' : 'ok';
+  return `<div class="small" style="display:flex;justify-content:space-between;margin-top:10px"><span class="mute">Presupuesto del mes</span><b class="t-${c}">${r.pctPresupuesto}%</b></div>
+    <div class="meter"><i class="sem-${c}" style="width:${Math.min(100, r.pctPresupuesto)}%"></i></div><div class="small mute">$ ${fmtN(r.gastado, 0)} de $ ${fmtN(r.tope, 0)}</div>`;
+}
+VIEWS_FN.tablero = () => {
+  const mes = S.f.mes, t = hoy(), ps = S.data.projects.filter((p) => p.active);
+  const rs = ps.map((p) => resumenProyecto(p, S.data, mes, t)), lin = rs.filter((r) => r.tipo === 'LIN'), red = rs.filter((r) => r.tipo === 'RED');
+  const sum = (arr, k) => arr.reduce((a, r) => a + (r[k] || 0), 0);
+  const pubs = sum(lin, 'terminadas'), obj = sum(lin, 'objetivo') || sum(lin, 'total'), ent = sum(red, 'terminadas'), totRed = sum(red, 'total');
+  const venc = sum(rs, 'vencidas') + sum(rs, 'atrasadasDeOtrosMeses'), porV = sum(rs, 'porVencer');
+  const conTope = lin.filter((r) => r.tope), tope = sum(conTope, 'tope'), gast = sum(conTope, 'gastado');
+  const a = misAlertas(), qh = quehaceres(a);
+  const card = (r) => `<div class="card pcard" data-act="lproy" data-p="${h(r.code)}"><div class="ch"><h2 class="mono">${h(r.code)}</h2><span class="sub">${h(r.cliente)}</span>
+      ${r.vencidas + r.atrasadasDeOtrosMeses ? `<span class="tag bad" style="margin-left:auto">${r.vencidas + r.atrasadasDeOtrosMeses} para atender</span>` : r.porVencer ? `<span class="tag warn" style="margin-left:auto">${r.porVencer} por vencer</span>` : `<span class="tag ok" style="margin-left:auto">Al día</span>`}</div>
+    <div class="cb"><div style="display:flex;align-items:baseline;gap:8px"><span class="big">${r.terminadas}</span><span class="mute">de ${r.tipo === 'LIN' ? (r.objetivo ?? r.total) + ' links publicados' : r.total + ' redacciones entregadas'}</span></div>
+      ${barraSemaforo(r)}<div class="small mute" style="margin-top:6px">${r.terminadas} terminadas · ${r.enCurso} en curso · ${r.porVencer} por vencer · ${r.vencidas} vencidas o con problema${r.atrasadasDeOtrosMeses ? ` · ${r.atrasadasDeOtrosMeses} atrasadas de meses anteriores` : ''}</div>${medidorPresupuesto(r)}</div></div>`;
+  return {
+    title: 'Tablero', sub: `${mesLargo(mes)} · vista de líder, solo lectura`,
+    actions: `<input type="month" data-f="mes" value="${h(mes)}" style="width:auto">`,
+    body: `<div class="kpis">
+      <div class="kpi"><div class="k">Links publicados</div><div class="v">${pubs} <span class="mute" style="font-size:14px;font-weight:500">/ ${obj}</span></div><div class="meter"><i class="sem-ok" style="width:${Math.min(100, pct(pubs, obj))}%"></i></div><div class="d">${pct(pubs, obj)}% del objetivo del mes</div></div>
+      <div class="kpi"><div class="k">Redacciones entregadas</div><div class="v">${ent} <span class="mute" style="font-size:14px;font-weight:500">/ ${totRed}</span></div><div class="meter"><i class="sem-ok" style="width:${pct(ent, totRed)}%"></i></div><div class="d">${pct(ent, totRed)}% de las del mes</div></div>
+      <div class="kpi ${venc ? 'hot' : ''}"><div class="k">Vencidas o con problemas</div><div class="v t-${venc ? 'bad' : 'ok'}">${venc}</div><div class="d">${porV} por vencer en 7 días</div></div>
+      <div class="kpi"><div class="k">Presupuesto de links usado</div><div class="v">${tope ? pct(gast, tope) + '%' : '—'}</div><div class="meter"><i class="sem-${pct(gast, tope) > 100 ? 'bad' : pct(gast, tope) >= 90 ? 'warn' : 'ok'}" style="width:${Math.min(100, pct(gast, tope))}%"></i></div><div class="d">${tope ? `$ ${fmtN(gast, 0)} de $ ${fmtN(tope, 0)}` : 'Sin topes cargados'}</div></div></div>
+    <div class="card" style="margin-top:20px"><div class="ch"><h2>Quehaceres</h2><span class="sub">Lo que necesita una decisión o un seguimiento</span></div>${qh.length ? `<table class="tbl"><tbody>${qh.map((q) => `<tr data-act="lproy" data-p="${h(q.p)}" style="cursor:pointer"><td style="width:24px">${semDot(q.c)}</td><td><b>${h(q.txt)}</b>${q.det ? `<div class="small mute">${h(q.det)}</div>` : ''}</td><td class="mono nowrap mute">${h(q.p)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada pendiente.</div>'}</div>
+    <h3 class="seccion">Link building</h3><div class="pgrid">${lin.map(card).join('') || '<div class="empty">Sin proyectos de links.</div>'}</div>
+    ${red.length ? `<h3 class="seccion">Redacciones</h3><div class="pgrid">${red.map(card).join('')}</div>` : ''}
+    <p class="small mute">${semDot('ok')} terminada ${semDot('')} en curso ${semDot('warn')} vence en 7 días o menos ${semDot('bad')} vencida o con problema de indexación</p>`,
+  };
+};
+/** Pendientes del líder, agrupados por proyecto. */
+function quehaceres(a) {
+  const out = [], porP = (arr) => arr.reduce((m, x) => ((m[x.project] ||= []).push(x), m), {});
+  for (const x of a.lider.filter((x) => x.kind === 'proyecto')) out.push({ c: 'bad', p: x.project, txt: `${x.project} requiere esquema de precios`, det: x.motivo.replace(/^El proyecto requiere esquema de precios · /, '') });
+  for (const [p, arr] of Object.entries(porP(a.impagas))) out.push({ c: 'warn', p, txt: `${arr.length} link${arr.length > 1 ? 's' : ''} publicado${arr.length > 1 ? 's' : ''} sin pagar`, det: arr.map((x) => x.code).join(', ') });
+  for (const [p, arr] of Object.entries(porP(a.indexacion))) out.push({ c: 'bad', p, txt: `${arr.length} con problemas de indexación`, det: arr.map((x) => x.code).join(', ') });
+  for (const [p, arr] of Object.entries(porP(a.lider.filter((x) => x.kind !== 'proyecto')))) out.push({ c: 'warn', p, txt: `${arr.length} necesita${arr.length > 1 ? 'n' : ''} validación del líder`, det: arr.map((x) => `${x.code}: ${x.motivo}`).join(' · ').slice(0, 220) });
+  const t = hoy(); const venc = {};
+  for (const x of [...S.data.lb.map((o) => ['lb', o]), ...S.data.red.map((o) => ['red', o])]) if (semaforo(x[0], x[1], t).txt === 'Vencida') (venc[x[1].project] ||= []).push(x[1]);
+  for (const [p, arr] of Object.entries(venc)) out.push({ c: 'bad', p, txt: `${arr.length} tarea${arr.length > 1 ? 's' : ''} vencida${arr.length > 1 ? 's' : ''}`, det: [...new Set(arr.map((x) => x.usuario).filter(Boolean))].join(', ') });
+  return out.sort((x, y) => (x.c === 'bad' ? 0 : 1) - (y.c === 'bad' ? 0 : 1) || x.p.localeCompare(y.p));
+}
+VIEWS_FN.lproyectos = () => {
+  const ps = S.data.projects.filter((p) => p.active), cur = S.f.lProj && ps.some((p) => p.code === S.f.lProj) ? S.f.lProj : ps[0]?.code, p = proj(cur), t = hoy();
+  if (!p) return { title: 'Proyectos', body: '<div class="card"><div class="empty">Todavía no hay proyectos: traé tus tareas de AppSheet desde Ajustes.</div></div>' };
+  const lin = p.tipo === 'LIN', kind = lin ? 'lb' : 'red', f = S.f;
+  let arr = S.data[kind].filter((x) => x.project === cur).map((x) => ({ x, s: semaforo(kind, x, t), d: lin ? x.deadline : x.fecha_entrega }));
+  if (f.lMes) arr = arr.filter((o) => (o.d || '').startsWith(f.lMes));
+  if (f.lSem) arr = arr.filter((o) => (f.lSem === 'run' ? o.s.c === '' : o.s.c === f.lSem));
+  else arr = arr.filter((o) => o.s.c !== 'off');
+  const orden = { bad: 0, warn: 1, '': 2, ok: 3, off: 4 };
+  arr.sort((a, b) => orden[a.s.c] - orden[b.s.c] || String(a.d || '9').localeCompare(String(b.d || '9')));
+  const r = resumenProyecto(p, S.data, f.mes, t), meses = [...new Set(S.data[kind].filter((x) => x.project === cur).map((x) => ((lin ? x.deadline : x.fecha_entrega) || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+  return {
+    title: 'Proyectos', sub: `${p.code} · ${p.cliente} · solo lectura`,
+    body: `<div class="chips">${ps.map((q) => `<button class="${q.code === cur ? 'on' : ''}" data-act="lproy" data-p="${h(q.code)}">${h(q.code)}</button>`).join('')}</div>
+    <div class="cols c21" style="margin-top:0"><div class="card"><div class="ch"><h2>${h(p.cliente)} · ${mesLargo(f.mes)}</h2></div><div class="cb">${barraSemaforo(r)}<div class="small mute" style="margin-top:6px">${r.terminadas} terminadas de ${lin ? r.objetivo ?? r.total : r.total} · ${r.enCurso} en curso · ${r.porVencer} por vencer · ${r.vencidas} vencidas</div></div></div>
+      <div class="card"><div class="cb">${medidorPresupuesto(r) || '<div class="small mute">Sin presupuesto cargado para este proyecto.</div>'}</div></div></div>
+    <div class="toolbar" style="margin-top:16px"><select data-f="lMes"><option value="">Todos los meses</option>${opts(meses, f.lMes, meses.map(mesLargo))}</select>
+      <select data-f="lSem">${opts(['', 'bad', 'warn', 'run', 'ok', 'off'], f.lSem, ['Todas (sin anuladas)', 'Vencidas o con problema', 'Por vencer', 'En curso', 'Terminadas', 'Anuladas'])}</select><span class="mute small" style="margin-left:auto">${arr.length} tarea${arr.length === 1 ? '' : 's'}</span></div>
+    <div class="card tblwrap"><table class="tbl lider"><thead><tr><th></th><th>Código</th><th>${lin ? 'Anchor' : 'Tema'}</th>${lin ? '<th>Medio</th>' : ''}<th>Asignado</th><th>Estado</th><th>${lin ? 'Mes plan.' : 'Entrega'}</th><th>Situación</th></tr></thead><tbody>
+      ${arr.map(({ x, s, d }) => `<tr class="row-${s.c || 'run'}"><td>${semDot(s.c, s.txt)}</td><td class="mono nowrap">${h(x.as_code)}</td><td class="wrap" style="max-width:340px">${h(lin ? x.anchor : x.tema) || '<span class="mute">—</span>'}</td>${lin ? `<td>${h(normDomain(x.medio))}</td>` : ''}<td class="nowrap">${h(x.usuario)}</td><td class="small">${h(x.estado)}</td><td class="nowrap">${lin ? fmtMes(d) : fmtD(d)}</td><td class="nowrap t-${s.c || 'run'}"><b>${h(s.txt)}</b></td></tr>`).join('') || '<tr><td colspan="8" class="empty">No hay tareas con estos filtros.</td></tr>'}</tbody></table></div>`,
+  };
+};
+VIEWS_FN.lalertas = () => {
+  const a = misAlertas(), qh = quehaceres(a), porP = {};
+  for (const q of qh) (porP[q.p] ||= []).push(q);
+  const quietas = a.quietas.reduce((m, x) => ((m[x.project] ||= []).push(x), m), {});
+  const ps = [...new Set([...Object.keys(porP), ...Object.keys(quietas)])].sort();
+  return {
+    title: 'Para revisar', sub: 'Lo importante de cada proyecto, sin el detalle operativo',
+    body: ps.length ? `<div class="pgrid">${ps.map((p) => `<div class="card"><div class="ch"><h2 class="mono">${h(p)}</h2><span class="sub">${h(proj(p)?.cliente || '')}</span><button class="lnk small" data-act="lproy" data-p="${h(p)}" style="margin-left:auto">Ver tareas →</button></div>
+      <ul class="hl">${(porP[p] || []).map((q) => `<li>${semDot(q.c)}<div><b>${h(q.txt)}</b>${q.det ? `<div class="small mute">${h(q.det)}</div>` : ''}</div></li>`).join('')}
+      ${quietas[p] ? `<li>${semDot('warn')}<div><b>${quietas[p].length} tarea${quietas[p].length > 1 ? 's' : ''} sin moverse hace más de ${S.data.settings.dias_quieta || 14} días</b><div class="small mute">${h(quietas[p].slice(0, 6).map((x) => `${x.code} (${x.dias} días en ${x.estado})`).join(' · '))}</div></div></li>` : ''}</ul></div>`).join('')}</div>`
+      : '<div class="card"><div class="empty">Todo en orden: nada para revisar.</div></div>',
+  };
+};
 
 // ---------- Medios: compilado + mis contactos ----------
 async function cargarMedios(force) { if (S.medios && !force) return S.medios; S.medios = await api('/api/medios'); return S.medios; }
@@ -498,7 +598,7 @@ async function armarPlan() {
 
 // ---------- Notas y alertas ----------
 function misAlertas() { if (S._al && S._al.d === S.data) return S._al.v; const v = alertas(S.data, { hoy: hoy(), diasQuieta: Number(S.data.settings.dias_quieta || 14), yo: YO }); S._al = { d: S.data, v }; return v; }
-const alertTbl = (arr, vacio) => arr.length ? `<table class="tbl"><tbody>${arr.map((a) => `<tr data-open="${a.kind}" data-id="${h(a.id)}"><td class="mono nowrap">${h(a.code)}</td><td style="max-width:260px" title="${h(a.titulo)}">${h(a.titulo)}</td><td class="wrap small">${h(a.motivo)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${vacio}</div>`;
+const alertTbl = (arr, vacio) => arr.length ? `<table class="tbl"><tbody>${arr.map((a) => `<tr ${a.kind === 'proyecto' ? `data-act="verproy" data-p="${h(a.project)}" style="cursor:pointer"` : `data-open="${a.kind}" data-id="${h(a.id)}"`}><td class="mono nowrap">${h(a.code)}</td><td style="max-width:260px" title="${h(a.titulo)}">${h(a.titulo)}</td><td class="wrap small">${h(a.motivo)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${vacio}</div>`;
 VIEWS_FN.alertas = () => {
   const a = misAlertas(), notas = S.data.notas || [], lider = notas.filter((n) => n.lider && !n.hecha), mias = notas.filter((n) => !n.lider || n.hecha);
   const nota = (n) => `<tr><td class="ck"><input type="checkbox" class="notack" data-id="${h(n.id)}" ${n.hecha ? 'checked' : ''} title="Hecha"></td><td class="wrap ${n.hecha ? 'mute' : ''}" style="${n.hecha ? 'text-decoration:line-through' : ''}">${h(n.texto)}</td><td class="nowrap mute small">${new Date(n.created_at).toLocaleDateString('es-AR')}</td><td><button class="lnk small" data-act="notadel" data-id="${h(n.id)}">Borrar</button></td></tr>`;
@@ -626,12 +726,14 @@ setInterval(() => {
 }, 30_000);
 function renderTimer() {
   const el = $('#sidetimer'); if (!el) return;
+  if (modoActual() === 'lider') return renderModo();
   const t = hoy(), auto = S.data.hours.filter((x) => x.auto && x.date === t), tot = auto.reduce((a, x) => a + x.hours, 0);
   const por = {}; for (const a of S.data.actividad || []) por[a.quien] = (por[a.quien] || 0) + (a.fin - a.inicio) / 60000;
   const activo = S.focoAt && Date.now() - S.focoAt < 70_000;
   el.innerHTML = `<div class="lbl">${activo ? '<span class="run"></span>' : ''}Tiempo de hoy · automático</div><div class="clock">${Math.floor(tot)}:${String(Math.round((tot % 1) * 60)).padStart(2, '0')} h</div>
     <div class="small mute">${Object.entries(por).map(([q, m]) => `${h(QUIEN[q] || q)} ${Math.round(m)} min`).join(' · ') || 'Abrí una tarea y empieza a contar'}</div>
-    ${activo ? `<div class="small" style="margin-top:4px">Contando: <b class="mono">${h(S.focoTxt)}</b></div>` : ''}<button class="lnk small" data-act="view" data-v="horas" style="margin-top:6px">Ver horas →</button>`;
+    ${activo ? `<div class="small" style="margin-top:4px">Contando: <b class="mono">${h(S.focoTxt)}</b></div>` : ''}<button class="lnk small" data-act="view" data-v="horas" style="margin-top:6px">Ver horas →</button>
+    <div class="seg2" style="margin-top:10px"><button class="on" data-act="modo" data-v="tecnico">Técnico</button><button data-act="modo" data-v="lider">Líder</button></div>`;
 }
 
 // ---------- editor de redacción ----------
@@ -743,6 +845,9 @@ document.addEventListener('click', async (ev) => {
       break;
     }
     case 'tab': S.f[el.dataset.f] = el.dataset.v; render(); break;
+    case 'modo': localStorage.setItem('pe_modo_' + S.data.me.id, el.dataset.v); S.view = el.dataset.v === 'lider' ? 'tablero' : 'inicio'; render(); break;
+    case 'lproy': S.f.lProj = el.dataset.p; S.view = 'lproyectos'; render(); $('#view').scrollTop = 0; break;
+    case 'verproy': { const p = proj(el.dataset.p); if (p?.tipo === 'RED') { S.view = 'red'; Object.assign(S.f, { redProj: p.code, redEstado: 'activas', redUser: '' }); } else { S.view = 'lb'; Object.assign(S.f, { lbProj: el.dataset.p, lbEstado: 'activas', lbUser: '' }); } render(); break; }
     case 'sug': { const x = misAlertas().sugerencias[Number(el.dataset.i)]; if (x.filtro.view) { S.view = x.filtro.view; } else { S.view = 'lb'; Object.assign(S.f, { lbProj: '', lbMail: '', lbNeg: '', lbMes: '', lbQ: '', lbUser: YO }, x.filtro); } render(); break; }
     case 'notadel': if (confirm('¿Borrar la nota?')) { await api('/api/notas/' + el.dataset.id, 'DELETE'); await load(); } break;
     case 'planarmar': try { await armarPlan(); } catch (e) { toast(e.message); } break;
@@ -772,6 +877,7 @@ document.addEventListener('change', async (ev) => {
   if (el.classList.contains('selck')) { const k = el.dataset.k; el.checked ? S.sel[k].add(el.dataset.id) : S.sel[k].delete(el.dataset.id); render(); api('/api/act/ping', 'POST', { refs: [...S.sel[k]].map((ref) => ({ kind: k, ref })) }).catch(() => {}); return; }
   if (el.classList.contains('selall')) { const k = el.dataset.k; for (const id of S.visibles?.[k] || []) el.checked ? S.sel[k].add(id) : S.sel[k].delete(id); render(); return; }
   if (el.classList.contains('notack')) { const n = S.data.notas.find((x) => x.id === el.dataset.id); await api('/api/notas', 'POST', { ...n, hecha: el.checked }); await load(); return; }
+  if (el.classList.contains('umodo')) { await api('/api/usuarios/modo', 'POST', { id: el.dataset.id, modo: el.value }); if (el.dataset.id === S.data.me.id) localStorage.removeItem('pe_modo_' + S.data.me.id); toast('Modo predeterminado guardado'); await load(); return; }
   if (el.id === 'diasq') { await api('/api/settings', 'POST', { dias_quieta: el.value }); await load(); return; }
   if (el.id === 'medcsv' && el.files[0]) { importarCompilado(el.files[0]).catch((e) => toast(e.message)); return; }
   if (el.dataset.f && el.type !== 'search') { S.f[el.dataset.f] = el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value; render(); return; }
