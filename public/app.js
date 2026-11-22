@@ -1,6 +1,8 @@
 // Proyectos Eleven — app de escritorio (PWA instalable desde Chrome o Edge). Un solo usuario; todo se guarda en el servidor.
-import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain, compiladoAMedios, aptoMedio, planificar, alertas, QUIEN, DOC_EDITABLE_LB } from './shared.js';
+import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO as YO_DEF, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain, compiladoAMedios, aptoMedio, planificar, alertas, QUIEN, DOC_EDITABLE_LB } from './shared.js';
 
+/** Tu nombre en AppSheet (cada usuario ve sus tareas); se toma de la sesión al cargar. */
+let YO = YO_DEF;
 const S = {
   token: localStorage.getItem('pe_token') || '', setup: false, data: null, view: localStorage.getItem('pe_view') || 'inicio', calurl: '',
   f: { lbProj: '', lbEstado: 'activas', lbQ: '', lbUser: YO, lbMail: '', lbNeg: '', lbMes: '', lbGroup: '1', redProj: '', redEstado: 'activas', redQ: '', redUser: YO, redGroup: '1', medGroup: 'mail_eleven', medQ: '', mes: hoyEn().slice(0, 7), medTab: 'compilado', mProj: '', mPais: '', mPrecio: '', mDr: '', mMail: '', mQ: '', planMes: addDays(hoyEn().slice(0, 7) + '-28', 7).slice(0, 7), iaProj: '' },
@@ -48,8 +50,12 @@ async function api(path, method = 'GET', body) {
 /** Las tareas de prueba viven aparte (S.data.lbP / redP): nunca se mezclan con las reales ni van a AppSheet. */
 function separarPruebas(d) { if (!d || d.lbP) return d; d.lbP = d.lb.filter((t) => t.prueba); d.lb = d.lb.filter((t) => !t.prueba); d.redP = d.red.filter((t) => t.prueba); d.red = d.red.filter((t) => !t.prueba); return d; }
 const tarea = (k, id) => S.data[k].find((o) => o.id === id) || S.data[k + 'P']?.find((o) => o.id === id);
+function tomarUsuario() {
+  if (!S.data?.me) return; const antes = YO; YO = S.data.me.nombre || YO_DEF;
+  if (!S.yoListo || antes !== YO) { S.f.lbUser = YO; S.f.redUser = YO; S.yoListo = true; }
+}
 async function load() {
-  try { S.data = separarPruebas(await api('/api/data')); localStorage.setItem('pe_cache', JSON.stringify({ ...S.data, lb: [...S.data.lb, ...S.data.lbP], red: [...S.data.red, ...S.data.redP], lbP: undefined, redP: undefined })); }
+  try { S.data = separarPruebas(await api('/api/data')); tomarUsuario(); localStorage.setItem('pe_cache', JSON.stringify({ ...S.data, lb: [...S.data.lb, ...S.data.lbP], red: [...S.data.red, ...S.data.redP], lbP: undefined, redP: undefined })); }
   catch { if (!S.data) { try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); } catch { /* nada */ } } if (S.token) toast('Sin conexión: se muestran los últimos datos'); }
   render();
 }
@@ -83,9 +89,13 @@ function render() {
   renderTimer();
 }
 function renderLogin() {
-  $('#app').innerHTML = `<div class="login"><form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${S.setup ? 'Primera vez: creá tu contraseña (mínimo 8 caracteres).' : 'Ingresá con tu contraseña.'}</p>
-    <label>Contraseña<input type="password" name="pw" autocomplete="${S.setup ? 'new-password' : 'current-password'}" required minlength="8" autofocus></label>
-    <button class="btn full" style="margin-top:14px">${S.setup ? 'Crear y entrar' : 'Entrar'}</button><div class="err" id="lerr"></div></form></div>`;
+  const alta = S.setup || S.invitacion;
+  const intro = S.invitacion === false ? 'Esta invitación ya se usó o no existe. Pedile un link nuevo a quien te invitó.' : S.invitacion ? 'Te invitaron a Proyectos Eleven. Creá tu cuenta: tu nombre tiene que ser igual al de AppSheet, así la app encuentra tus tareas.' : S.setup ? 'Primera vez: creá tu cuenta.' : 'Ingresá con tu mail (o tu nombre) y tu contraseña.';
+  $('#app').innerHTML = `<div class="login"><form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${intro}</p>
+    ${S.invitacion === false ? '' : alta ? `<label>Nombre (igual que en AppSheet)<input name="nombre" required minlength="3" placeholder="Nombre Apellido" autofocus></label><label>Mail<input name="email" type="email" required autocomplete="email"></label>`
+      : `<label>Mail o nombre<input name="usuario" autocomplete="username" autofocus></label>`}
+    ${S.invitacion === false ? '' : `<label>Contraseña<input type="password" name="pw" autocomplete="${alta ? 'new-password' : 'current-password'}" required minlength="8"></label>
+    <button class="btn full" style="margin-top:14px">${alta ? 'Crear cuenta y entrar' : 'Entrar'}</button>`}<div class="err" id="lerr"></div></form></div>`;
 }
 const searchBox = (f, ph) => `<div class="search">${ic('search')}<input type="search" data-f="${f}" placeholder="${ph}" value="${h(S.f[f])}"></div>`;
 function th(view, key, label, cls = '') { const [k, d] = S.sort[view]; return `<th data-sort="${key}" data-sv="${view}" class="${cls}">${label}${k === key ? `<span class="arr">${d > 0 ? '▲' : '▼'}</span>` : ''}</th>`; }
@@ -111,7 +121,7 @@ VIEWS_FN.inicio = () => {
   return {
     title: 'Inicio', sub: fecha.charAt(0).toUpperCase() + fecha.slice(1),
     actions: `<button class="btn sec" data-act="newhours">${ic('horas')}Cargar horas</button><button class="btn sec" data-act="newred">${ic('plus')}Redacción</button><button class="btn" data-act="newlb">${ic('plus')}Tarea de LB</button>`,
-    body: `<div class="kpis">
+    body: `${!S.data.projects.length ? `<div class="alert" style="margin:0 0 16px;background:var(--acc-bg);border-color:#c7d7fe"><b>Primer paso: traé tus tareas de AppSheet.</b> Andá a <a href="#" data-act="view" data-v="ajustes">Ajustes → Traer tus tareas de AppSheet</a>, arrastrá el botón a la barra de favoritos y tocalo con AppSheet abierto. Se cargan tus proyectos y tus tareas.</div>` : ''}<div class="kpis">
       <div class="kpi"><div class="k">Horas hoy</div><div class="v">${fmtN(totHoy)}</div><div class="d">Semana: ${fmtN(totSem)} h</div></div>
       <div class="kpi"><div class="k">Horas del mes</div><div class="v">${fmtN(rm)} <span class="mute" style="font-size:14px;font-weight:500">/ ${fmtN(pm)}</span></div><div class="d">${pm ? Math.round((rm / pm) * 100) : 0}% del plan de ${MESES[Number(mes.slice(5)) - 1]}</div></div>
       <div class="kpi ${venc.length ? 'hot' : ''}"><div class="k">Vencidas</div><div class="v">${venc.length}</div><div class="d">${prox.length - venc.length} en los próximos 7 días</div></div>
@@ -375,7 +385,14 @@ VIEWS_FN.ajustes = () => {
       <p class="small mute" id="pushmsg">Los avisos llegan como notificaciones de Windows aunque la app esté cerrada (Chrome o Edge tienen que estar abiertos en segundo plano).</p></div></div>
     <div class="card"><div class="ch"><h2>Instalar como app de escritorio</h2></div><div class="cb">
       <ol class="steps" style="margin-top:0"><li>Abrí esta página en <b>Chrome</b> o <b>Edge</b>.</li><li>En la barra de direcciones, tocá el ícono de <b>Instalar</b> (o menú ⋮ → <b>Transmitir, guardar y compartir → Instalar página como app</b>).</li><li>Queda con su propia ventana, ícono en la barra de tareas y en el menú Inicio. Clic derecho en el ícono: accesos directos a nueva tarea y cargar horas.</li></ol></div></div>
-    <div class="card"><div class="ch"><h2>Cuenta y datos</h2></div><div class="cb" style="display:flex;gap:8px"><button class="btn sm sec" data-act="export">Descargar mis datos (JSON)</button><button class="btn sm sec" data-act="logout">Cerrar sesión</button></div></div></div>`,
+    <div class="card"><div class="ch"><h2>Traer tus tareas de AppSheet</h2>${st.as_sync_at ? `<span class="sub">Última vez: ${new Date(Number(st.as_sync_at)).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</span>` : '<span class="tag warn">Pendiente</span>'}</div><div class="cb">
+      <ol class="steps" style="margin-top:0"><li>Mostrá la barra de favoritos del navegador (Ctrl+Mayús+B).</li><li>Arrastrá este botón a la barra: <a class="btn sm" id="bmk" href="#" draggable="true" onclick="return false" title="Arrastralo a la barra de favoritos">↧ Traer de AppSheet</a></li><li>Abrí AppSheet (Eleven - Operaciones) y tocá el favorito. Lee tus links y redacciones (tarda 1 o 2 minutos) y los manda a tu cuenta. Después tocá <b>Actualizar</b> acá.</li></ol>
+      <p class="small mute">Repetilo cuando quieras traer lo último. El botón tiene una clave tuya: no lo compartas. <button class="lnk small" data-act="bmknuevo">Generar una clave nueva</button></p></div></div>
+    ${S.data.me?.admin ? `<div class="card"><div class="ch"><h2>Usuarios</h2><span class="sub">${S.data.usuarios.length}</span></div><div class="cb">
+      <table class="tbl" style="margin-bottom:12px"><tbody>${S.data.usuarios.map((u) => `<tr><td>${h(u.nombre)}${u.admin ? ' <span class="tag">admin</span>' : ''}</td><td class="mute">${h(u.email)}</td><td class="mute small">${new Date(u.created_at).toLocaleDateString('es-AR')}</td></tr>`).join('')}</tbody></table>
+      <button class="btn sm" data-act="invitar">Invitar a alguien</button><code class="url" id="invlink" style="margin-top:10px;display:none"></code>
+      <p class="small mute">El link sirve para una sola cuenta. Cada persona ve solo sus tareas, horas, prompts y claves.</p></div></div>` : ''}
+    <div class="card"><div class="ch"><h2>Cuenta y datos</h2><span class="sub">${h(S.data.me?.nombre || '')} · ${h(S.data.me?.email || '')}</span></div><div class="cb" style="display:flex;gap:8px"><button class="btn sm sec" data-act="export">Descargar mis datos (JSON)</button><button class="btn sm sec" data-act="logout">Cerrar sesión</button></div></div></div>`,
   };
 };
 
@@ -480,7 +497,7 @@ async function armarPlan() {
 }
 
 // ---------- Notas y alertas ----------
-function misAlertas() { if (S._al && S._al.d === S.data) return S._al.v; const v = alertas(S.data, { hoy: hoy(), diasQuieta: Number(S.data.settings.dias_quieta || 14) }); S._al = { d: S.data, v }; return v; }
+function misAlertas() { if (S._al && S._al.d === S.data) return S._al.v; const v = alertas(S.data, { hoy: hoy(), diasQuieta: Number(S.data.settings.dias_quieta || 14), yo: YO }); S._al = { d: S.data, v }; return v; }
 const alertTbl = (arr, vacio) => arr.length ? `<table class="tbl"><tbody>${arr.map((a) => `<tr data-open="${a.kind}" data-id="${h(a.id)}"><td class="mono nowrap">${h(a.code)}</td><td style="max-width:260px" title="${h(a.titulo)}">${h(a.titulo)}</td><td class="wrap small">${h(a.motivo)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${vacio}</div>`;
 VIEWS_FN.alertas = () => {
   const a = misAlertas(), notas = S.data.notas || [], lider = notas.filter((n) => n.lider && !n.hecha), mias = notas.filter((n) => !n.lider || n.hecha);
@@ -704,7 +721,9 @@ document.addEventListener('click', async (ev) => {
   if (row && !ev.target.closest('select,button,input,td.ck,a')) { const k = row.dataset.open, x = k === 'hours' ? S.data.hours.find((o) => o.id === row.dataset.id) : tarea(k, row.dataset.id); return openDrawer({ lb: lbForm, red: redForm, hours: hoursForm }[k](x)); }
   const el = ev.target.closest('[data-act]'); if (!el || el.tagName === 'SELECT') return;
   switch (el.dataset.act) {
-    case 'view': ev.preventDefault(); closeDrawer(); if (el.dataset.v === 'ia') S.iaEstado = null; S.view = el.dataset.v; localStorage.setItem('pe_view', S.view); if (S.view === 'ajustes') loadCal(); $('#view') && ($('#view').scrollTop = 0); render(); break;
+    case 'invitar': { const r = await api('/api/invites', 'POST'); const el2 = $('#invlink'); el2.style.display = 'block'; el2.textContent = r.link; navigator.clipboard?.writeText(r.link).then(() => toast('Link de invitación copiado')); break; }
+    case 'bmknuevo': if (confirm('El botón anterior deja de funcionar y vas a tener que arrastrar el nuevo. ¿Seguir?')) { await prepararBoton(true); toast('Clave nueva: arrastrá otra vez el botón a la barra'); } break;
+    case 'view': ev.preventDefault(); closeDrawer(); if (el.dataset.v === 'ia') S.iaEstado = null; S.view = el.dataset.v; localStorage.setItem('pe_view', S.view); if (S.view === 'ajustes') { loadCal(); setTimeout(prepararBoton, 0); } $('#view') && ($('#view').scrollTop = 0); render(); break;
     case 'newlb': openDrawer(lbForm()); break;
     case 'newlbP': openDrawer(lbForm({ prueba: 1, usuario: YO, estado: 'Gestión de Backlink' })); break;
     case 'newredP': openDrawer(redForm({ prueba: 1, usuario: YO })); break;
@@ -774,7 +793,12 @@ document.addEventListener('input', (ev) => {
 document.addEventListener('submit', async (ev) => {
   ev.preventDefault(); const f = ev.target;
   if (f.id === 'loginf') {
-    try { const r = await api(S.setup ? '/api/setup' : '/api/login', 'POST', { password: f.pw.value }); S.token = r.token; localStorage.setItem('pe_token', r.token); S.setup = false; $('#app').innerHTML = ''; await load(); }
+    try {
+      const r = S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
+        : S.setup ? await api('/api/setup', 'POST', { nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
+        : await api('/api/login', 'POST', { usuario: f.usuario.value, password: f.pw.value });
+      S.token = r.token; localStorage.setItem('pe_token', r.token); S.setup = false; S.invitacion = undefined; history.replaceState(null, '', '/'); $('#app').innerHTML = ''; await load();
+    }
     catch (e) { $('#lerr').textContent = e.message; }
     return;
   }
@@ -800,6 +824,14 @@ document.addEventListener('keydown', (ev) => {
   if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter' && $('#drawer').classList.contains('open')) $('#drawer form')?.requestSubmit();
 });
 
+/** Arma el favorito "Traer de AppSheet" con la clave de este usuario (el código sale de /traer.js). */
+async function prepararBoton(nueva) {
+  try {
+    const [{ key, origin }, src] = await Promise.all([api('/api/import-key' + (nueva ? '?nueva=1' : '')), fetch('/traer.js', { cache: 'no-store' }).then((r) => r.text())]);
+    const code = src.replace(/^\s*\/\/.*$/gm, '').replace(/\n\s*/g, '\n') + `\ntraerDeAppSheet(${JSON.stringify(key)}, ${JSON.stringify(origin)});`;
+    const a = $('#bmk'); if (a) { a.href = 'javascript:' + encodeURIComponent('(async()=>{' + code + '})()'); a.onclick = () => { toast('Arrastralo a la barra de favoritos y tocalo desde AppSheet'); return false; }; }
+  } catch (e) { toast(e.message); }
+}
 async function loadCal() { try { S.calurl = (await api('/api/calendar')).url; const el = $('#calurl'); if (el) el.textContent = S.calurl; } catch { /* sin conexión */ } }
 
 // ---------- notificaciones ----------
@@ -821,13 +853,15 @@ versionApp().then((v) => { S.version = v; });
 const qs = new URLSearchParams(location.search);
 (async () => {
   if (S.token) {
-    try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); } catch { /* nada */ }
-    if (S.data) render(); if (S.view === 'ajustes') loadCal(); await load();
+    try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); tomarUsuario(); } catch { /* nada */ }
+    if (S.data) render(); if (S.view === 'ajustes') { loadCal(); setTimeout(prepararBoton, 300); } await load();
+    if (qs.get('invitacion')) { toast('Ya tenés una sesión abierta: para usar la invitación, cerrá sesión en Ajustes o abrí el link en otro navegador.'); }
     const n = qs.get('nuevo'); if (n === 'lb') openDrawer(lbForm()); else if (n === 'red') openDrawer(redForm()); else if (n === 'horas') openDrawer(hoursForm());
     if (n) history.replaceState(null, '', '/');
     return;
   }
-  try { S.setup = (await api('/api/state')).setup; } catch { /* sin conexión */ }
+  const inv = qs.get('invitacion'); if (inv) S.invitacionToken = inv;
+  try { const st = await api('/api/state' + (inv ? '?invitacion=' + encodeURIComponent(inv) : '')); S.setup = st.setup; S.invitacion = inv ? st.invitacion : undefined; } catch { /* sin conexión */ }
   render();
 })();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.token && !$('#drawer').classList.contains('open')) load(); });

@@ -11,6 +11,8 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS hours_date ON hours (date)`,
   `CREATE TABLE IF NOT EXISTS as_log (id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, ref TEXT NOT NULL, label TEXT NOT NULL, change TEXT NOT NULL, at INTEGER NOT NULL, done INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS push_subscriptions (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, email TEXT NOT NULL DEFAULT '', pw TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS invites (token TEXT PRIMARY KEY, created_by TEXT NOT NULL, created_at INTEGER NOT NULL, used_by TEXT NOT NULL DEFAULT '')`,
   `CREATE TABLE IF NOT EXISTS notification_log (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, date TEXT NOT NULL, sent_at INTEGER NOT NULL, UNIQUE (kind, date))`,
 ];
 
@@ -41,4 +43,22 @@ export const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS planes (month TEXT PRIMARY KEY, estado TEXT NOT NULL DEFAULT 'borrador', data TEXT NOT NULL, validacion TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL)`,
   `ALTER TABLE lb_tasks ADD COLUMN prueba INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE redacciones ADD COLUMN prueba INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE lb_tasks ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
+  `ALTER TABLE redacciones ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
+  `ALTER TABLE hours ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
+  `ALTER TABLE as_log ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
+  `ALTER TABLE notas ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
+  `ALTER TABLE actividad ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
+  `ALTER TABLE push_subscriptions ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
+  `ALTER TABLE sessions ADD COLUMN uid TEXT NOT NULL DEFAULT 'u1'`,
+  `CREATE INDEX IF NOT EXISTS lb_uid ON lb_tasks (uid)`,
+  `CREATE INDEX IF NOT EXISTS red_uid ON redacciones (uid)`,
 ];
+
+/** Tablas que pasan a tener clave por usuario (se reconstruyen una vez). */
+export const REBUILD: Record<string, { cols: string; create: string }> = {
+  projects: { cols: 'code, cliente, tipo, active, params, orden', create: `CREATE TABLE projects_n (uid TEXT NOT NULL DEFAULT 'u1', code TEXT NOT NULL, cliente TEXT NOT NULL, tipo TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, params TEXT NOT NULL DEFAULT '{}', orden INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (uid, code))` },
+  plan: { cols: 'month, project, task_type, hours, units', create: `CREATE TABLE plan_n (uid TEXT NOT NULL DEFAULT 'u1', month TEXT NOT NULL, project TEXT NOT NULL, task_type TEXT NOT NULL, hours REAL NOT NULL DEFAULT 0, units INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (uid, month, project, task_type))` },
+  prompts: { cols: 'project, clave, texto, updated_at', create: `CREATE TABLE prompts_n (uid TEXT NOT NULL DEFAULT 'u1', project TEXT NOT NULL, clave TEXT NOT NULL, texto TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, PRIMARY KEY (uid, project, clave))` },
+  planes: { cols: 'month, estado, data, validacion, updated_at', create: `CREATE TABLE planes_n (uid TEXT NOT NULL DEFAULT 'u1', month TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'borrador', data TEXT NOT NULL, validacion TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, PRIMARY KEY (uid, month))` },
+};

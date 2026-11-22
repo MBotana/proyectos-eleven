@@ -13,6 +13,7 @@ function mkEnv() {
   (DB as any).batch = async (sts: any[]) => { for (const st of sts) await st.run(); return []; };
   return { DB };
 }
+const U1 = (env: any) => ({ ...env, U: { id: 'u1', nombre: 'Martín Botana', email: '', admin: 1 } });
 const call = async (env: any, path: string, method = 'GET', body?: unknown, token?: string) => {
   const r = await handle(new Request('https://pe.test' + path, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) }), env);
   const ct = r.headers.get('content-type') || '';
@@ -69,7 +70,7 @@ test('tareas, cambios para AppSheet, horas y calendario', async () => {
   assert.doesNotMatch(ics.j, /cotizar seguro auto/, 'las publicadas no van al calendario');
   assert.equal((await call(env, '/cal/token-falso.ics')).status, 404);
 
-  const r = await resumenDeadlines(env as any, hoy);
+  const r = await resumenDeadlines(U1(env), hoy);
   assert.match(r!.title, /1 para mañana/);
 });
 
@@ -89,9 +90,9 @@ test('avisos programados: una vez por día', async () => {
   await call(env, '/api/red', 'POST', { project: 'NAV-RED-5', tema: 'Link de pago', fecha_entrega: hoyEn() }, tok);
   // martes 2026-11-17 19:00 en Buenos Aires = 22:00 UTC
   const t = Date.parse('2026-11-17T22:00:00Z');
-  const s1 = await runAvisos(env as any, 'https://pe.test', t);
+  const s1 = await runAvisos(U1(env), 'https://pe.test', t);
   assert.ok(s1.includes('horas'));
-  assert.deepEqual(await runAvisos(env as any, 'https://pe.test', t + 60000), []);
+  assert.deepEqual(await runAvisos(U1(env), 'https://pe.test', t + 60000), []);
 });
 
 test('importación desde AppSheet', async () => {
@@ -101,10 +102,10 @@ test('importación desde AppSheet', async () => {
     ['BOD-LIN-1-1', '30/11/2026', '', 'No Iniciado', '', '', '', '', '', '', 'X', '']];
   const red = [['LAV-RED-5-90', 'Receta de vitel toné', 'Argentina', 'Español', '', '', '30/11/2026', 'Normal', 'Para CMS', '', 'Martín Botana', '2/11/2026']];
   assert.equal((await call(env, '/api/import', 'POST', { lb, red })).status, 401, 'sin clave no entra');
-  await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('import_key', 'clave-de-importacion-larga-123')").run();
+  await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('u1:import_key', 'clave-de-importacion-larga-123')").run();
   const r = await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': 'clave-de-importacion-larga-123' }, body: JSON.stringify({ lb, red }) }), env as any);
   const j: any = await r.json();
-  assert.deepEqual(j, { lb: 2, red: 1, saltadas: 1 });
+  assert.deepEqual(j, { lb: 2, red: 1, saltadas: 1, proyectosNuevos: [] });
   assert.equal(r.headers.get('access-control-allow-origin'), 'https://www.appsheet.com');
   // los datos propios se conservan al reimportar
   let d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
@@ -145,11 +146,11 @@ test('cambio de estado en lote y registro automático de tiempo', async () => {
   // tiempo: latidos sobre una tarea + acción sobre dos tareas de proyectos distintos (se reparte) + IA
   await env.DB.prepare('DELETE FROM actividad').run();
   const t0 = Date.now() - 3600_000;
-  await actPing(env, [{ kind: 'lb', ref: a }], t0);
-  for (let i = 1; i <= 20; i++) await actPing(env, [{ kind: 'lb', ref: a }], t0 + i * 30_000); // 10 min en NAV
-  await actAccion(env, [{ kind: 'lb', ref: a }, { kind: 'lb', ref: b }], 'Enviado', t0 + 20 * 30_000 + 10 * 60_000); // 10 min repartidos
-  await actAgente(env, 'ia', [{ kind: 'lb', ref: b }], 'Redacción', t0, t0 + 120_000);
-  const hs = await horasAuto(env, addDays(hoyEn(), -2));
+  await actPing(U1(env), [{ kind: 'lb', ref: a }], t0);
+  for (let i = 1; i <= 20; i++) await actPing(U1(env), [{ kind: 'lb', ref: a }], t0 + i * 30_000); // 10 min en NAV
+  await actAccion(U1(env), [{ kind: 'lb', ref: a }, { kind: 'lb', ref: b }], 'Enviado', t0 + 20 * 30_000 + 10 * 60_000); // 10 min repartidos
+  await actAgente(U1(env), 'ia', [{ kind: 'lb', ref: b }], 'Redacción', t0, t0 + 120_000);
+  const hs = await horasAuto(U1(env), addDays(hoyEn(), -2));
   const nav = hs.find((x: any) => x.project === 'NAV-LIN-5'), xub = hs.find((x: any) => x.project === 'XUB-LIN-1');
   assert.ok(Math.abs(nav.hours - 0.26) < 0.02, 'NAV ' + nav.hours);   // 30 s + 10 min + 5 min
   assert.ok(Math.abs(xub.hours - 0.12) < 0.02, 'XUB ' + xub.hours);   // 5 min + 2 min de IA
@@ -245,4 +246,56 @@ test('tareas de prueba: no van a AppSheet ni suman horas', async () => {
   assert.equal(d.as_pend.length, 0, 'nada para AppSheet');
   assert.equal(d.red.find((r: any) => r.id === rid).prueba, 1);
   assert.equal(d.hours.filter((h: any) => h.auto).length, 0, 'sin horas automáticas');
+});
+
+test('varios usuarios: invitación, datos separados y carga desde AppSheet', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1', nombre: 'Martín Botana', email: 'martin@x.com' })).j.token;
+  await call(env, '/api/lb', 'POST', { project: 'NAV-LIN-5', anchor: 'de Martín' }, tok);
+  // sin invitación no hay alta
+  assert.equal((await call(env, '/api/signup', 'POST', { invitacion: 'nada', nombre: 'Franco Mercado', email: 'f@x.com', password: 'clave-franco-1' })).status, 403);
+  const inv = (await call(env, '/api/invites', 'POST', {}, tok)).j;
+  assert.match(inv.link, /\?invitacion=/);
+  assert.equal((await call(env, '/api/state?invitacion=' + inv.token)).j.invitacion, true);
+  const tf = (await call(env, '/api/signup', 'POST', { invitacion: inv.token, nombre: 'Franco Mercado', email: 'F@x.com', password: 'clave-franco-1' })).j.token;
+  assert.ok(tf);
+  assert.equal((await call(env, '/api/signup', 'POST', { invitacion: inv.token, nombre: 'Otro', email: 'o@x.com', password: 'clave-otro-123' })).status, 403, 'la invitación se usa una vez');
+  // Franco no ve nada de Martín y no puede invitar
+  let df = (await call(env, '/api/data', 'GET', undefined, tf)).j;
+  assert.equal(df.me.nombre, 'Franco Mercado'); assert.equal(df.lb.length, 0); assert.equal(df.projects.length, 0); assert.equal(df.prompts.length, 0);
+  assert.equal((await call(env, '/api/invites', 'POST', {}, tf)).status, 403);
+  // carga desde AppSheet con su clave: crea sus proyectos (copiando parámetros y prompts) y no pisa las tareas de Martín
+  const key = (await call(env, '/api/import-key', 'GET', undefined, tf)).j.key;
+  const lb = [['TEL-LIN-2-164', '30/11/2026', 'Intervalo métrica 21-40', 'Backlink Publicado', 'Honor X5c', 'inneuquen.info', 'Acuerdo Vencido', 'USD', '$160.00', '19/11/2026', 'Franco Mercado', 'natalia@x'],
+    ['NAV-LIN-5-60', '30/11/2026', 'Intervalo métrica 21-40', 'Gestión de Backlink', 'medios de pago', 'x.com', '', '', '', '', 'Martín Botana', '']];
+  const r = await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'x-import-key': key }, body: JSON.stringify({ lb, red: [], proyectos: ['TEL-LIN-2'] }) }), env as any);
+  const j: any = await r.json();
+  assert.deepEqual(j.proyectosNuevos, ['TEL-LIN-2']); assert.equal(j.lb, 1); assert.equal(j.saltadas, 1, 'NAV no es proyecto suyo');
+  df = (await call(env, '/api/data', 'GET', undefined, tf)).j;
+  assert.equal(df.lb[0].as_code, 'TEL-LIN-2-164'); assert.notEqual(df.lb[0].id, 'TEL-LIN-2-164', 'id propio');
+  assert.equal(df.projects[0].params.drMin, 20, 'copia los parámetros del proyecto');
+  assert.ok(df.prompts.some((p: any) => p.project === 'TEL-LIN-2'), 'copia los prompts');
+  // y Martín sigue viendo solo lo suyo
+  const dm = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(dm.lb.length, 1); assert.equal(dm.lb[0].anchor, 'de Martín'); assert.equal(dm.usuarios.length, 2);
+  assert.equal((await call(env, `/api/lb/${dm.lb[0].id}`, 'DELETE', undefined, tf)).status, 404, 'no puede borrar tareas ajenas');
+  // ingreso con mail o nombre
+  assert.ok((await call(env, '/api/login', 'POST', { usuario: 'f@x.com', password: 'clave-franco-1' })).j.token);
+  assert.ok((await call(env, '/api/login', 'POST', { usuario: 'martín botana', password: 'clave-segura-1' })).j.token);
+  assert.equal((await call(env, '/api/login', 'POST', { password: 'clave-segura-1' })).status, 401, 'con dos cuentas hay que decir quién sos');
+  // calendario de cada uno
+  const cf = (await call(env, '/api/calendar', 'GET', undefined, tf)).j.url as string, cm = (await call(env, '/api/calendar', 'GET', undefined, tok)).j.url as string;
+  assert.notEqual(cf, cm);
+  assert.match((await call(env, new URL(cf).pathname)).j, /BEGIN:VCALENDAR/);
+});
+
+test('migración: la cuenta única de antes pasa a ser el usuario 1', async () => {
+  const env = mkEnv();
+  const { hashPw } = await import('../src/worker.ts');
+  await env.DB.prepare('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)').run();
+  await env.DB.prepare("INSERT INTO settings VALUES ('pw', ?), ('cal_token', 'token-de-calendario-largo-123'), ('gemini_key', 'AIza-clave')").bind(await hashPw('clave-vieja-1')).run();
+  const tok = (await call(env, '/api/login', 'POST', { password: 'clave-vieja-1' })).j.token;
+  assert.ok(tok);
+  const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.me.id, 'u1'); assert.equal(d.me.admin, 1); assert.equal(d.settings.gemini, '1', 'conserva su clave de Gemini');
+  assert.equal((await call(env, '/cal/token-de-calendario-largo-123.ics')).status, 200, 'conserva su calendario');
 });
