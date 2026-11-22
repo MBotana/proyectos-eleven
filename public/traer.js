@@ -8,7 +8,7 @@ async function traerDeAppSheet(K, O) {
   const box = document.createElement('div');
   box.style.cssText = 'position:fixed;z-index:2147483647;top:14px;right:14px;max-width:360px;background:#1d4ed8;color:#fff;padding:12px 16px;border-radius:10px;font:14px/1.4 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25)';
   document.body.appendChild(box);
-  const msg = (t) => { box.textContent = 'Proyectos Eleven · ' + t; };
+  const msg = (t) => { box.textContent = 'Proyectos Eleven · ' + t; window.__peEstado = t; };
   const espera = (ms) => new Promise((r) => setTimeout(r, ms));
   const ir = async (v) => {
     location.hash = 'appName=' + app + '&view=' + v + '&vss='; // vss vacío: tablero sin proyecto seleccionado

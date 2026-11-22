@@ -369,7 +369,7 @@ VIEWS_FN.appsheet = () => {
   const pend = S.data.as_pend;
   return {
     title: 'Pendientes AppSheet', sub: 'Cambios hechos acá que todavía hay que reflejar en Eleven - Operaciones',
-    actions: pend.length ? `<button class="btn sec" data-act="asall">Seleccionar todos</button><button class="btn" data-act="asdone">Marcar como reflejados</button>` : '',
+    actions: pend.length ? `<button class="btn sec" data-act="claudesync" data-q="pasar">${ic('ia')}Pasar con Claude</button><button class="btn sec" data-act="asall">Seleccionar todos</button><button class="btn" data-act="asdone">Marcar como reflejados</button>` : '',
     body: `<div class="card">${pend.length ? `<table class="tbl"><thead><tr><th style="width:36px"></th><th>Fecha</th><th>Tipo</th><th>Tarea</th><th>Cambio</th></tr></thead><tbody>
       ${pend.map((a) => `<tr><td><input type="checkbox" class="asck" value="${a.id}"></td><td class="nowrap">${new Date(a.at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${a.entity === 'lb' ? 'Link' : 'Redacción'}</td><td class="mono">${h(a.label)}</td><td class="wrap">${h(a.change)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Todo al día: no hay cambios pendientes.</div>'}</div>`,
   };
@@ -396,6 +396,7 @@ VIEWS_FN.ajustes = () => {
     <div class="card"><div class="ch"><h2>Traer tus tareas de AppSheet</h2>${st.as_sync_at ? `<span class="sub">Última vez: ${new Date(Number(st.as_sync_at)).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</span>` : '<span class="tag warn">Pendiente</span>'}</div><div class="cb">
       <ol class="steps" style="margin-top:0"><li>Mostrá la barra de favoritos del navegador (Ctrl+Mayús+B).</li><li>Arrastrá este botón a la barra: <a class="btn sm" id="bmk" href="#" draggable="true" onclick="return false" title="Arrastralo a la barra de favoritos">↧ Traer de AppSheet</a></li><li>Abrí AppSheet (Eleven - Operaciones) y tocá el favorito. Lee tus links y redacciones (tarda 1 o 2 minutos) y los manda a tu cuenta. Después tocá <b>Actualizar</b> acá.</li></ol>
       <p class="small mute">Repetilo cuando quieras traer lo último. El botón tiene una clave tuya: no lo compartas. <button class="lnk small" data-act="bmknuevo">Generar una clave nueva</button></p></div></div>
+    ${tarjetaClaude()}
     ${S.data.me?.admin ? `<div class="card"><div class="ch"><h2>Usuarios</h2><span class="sub">${S.data.usuarios.length}</span></div><div class="cb">
       <table class="tbl" style="margin-bottom:12px"><tbody><tr><th>Nombre</th><th>Mail</th><th>Modo predeterminado</th><th>Desde</th></tr>${S.data.usuarios.map((u) => `<tr><td>${h(u.nombre)}${u.admin ? ' <span class="tag">admin</span>' : ''}</td><td class="mute">${h(u.email)}</td><td><select class="umodo" data-id="${h(u.id)}" style="width:auto;height:28px">${opts(['tecnico', 'lider'], u.modo || 'tecnico', ['Técnico', 'Líder'])}</select></td><td class="mute small">${new Date(u.created_at).toLocaleDateString('es-AR')}</td></tr>`).join('')}</tbody></table>
       <button class="btn sm" data-act="invitar">Invitar a alguien</button><code class="url" id="invlink" style="margin-top:10px;display:none"></code>
@@ -862,6 +863,10 @@ document.addEventListener('click', async (ev) => {
     case 'copy': navigator.clipboard?.writeText(el.dataset.v).then(() => toast('Mail copiado')); break;
     case 'copycal': navigator.clipboard?.writeText(S.calurl || '').then(() => toast('Link copiado')); break;
     case 'resetcal': if (confirm('El link anterior deja de funcionar y vas a tener que volver a agregarlo en Google Calendar. ¿Seguir?')) { S.calurl = (await api('/api/calendar/reset', 'POST')).url; render(); } break;
+    case 'claudeinst': instalarSkill(); break;
+    case 'claudezip': descargarSkill(); break;
+    case 'claudeok': localStorage.setItem('pe_skill', '1'); toast('Listo: la skill queda marcada como instalada'); render(); break;
+    case 'claudesync': sincronizarConClaude(el.dataset.q); break;
     case 'asall': document.querySelectorAll('.asck').forEach((c) => { c.checked = true; }); break;
     case 'asdone': { const ids = [...document.querySelectorAll('.asck:checked')].map((c) => Number(c.value)); if (!ids.length) return toast('Seleccioná al menos un cambio'); await api('/api/as/done', 'POST', { ids }); toast('Marcados como reflejados'); await load(); break; }
     case 'saveproj': $('#projf')?.requestSubmit(); break;
@@ -938,6 +943,72 @@ async function prepararBoton(nueva) {
     const a = $('#bmk'); if (a) { a.href = 'javascript:' + encodeURIComponent('(async()=>{' + code + '})()'); a.onclick = () => { toast('Arrastralo a la barra de favoritos y tocalo desde AppSheet'); return false; }; }
   } catch (e) { toast(e.message); }
 }
+// ---------- Claude (sincronizar con AppSheet desde el Claude de cada uno) ----------
+const PROMPTS_CLAUDE = {
+  instalar: (o) => `Instalá la skill "proyectos-eleven" para poder sincronizar mi app Proyectos Eleven con AppSheet. Leé el archivo ${o}/claude/SKILL.md y proponémelo como skill para guardar, con ese mismo nombre y contenido. Si desde este chat no se pueden guardar skills, decime cómo subirlo.`,
+  todo: (o) => `Usá la skill proyectos-eleven para sincronizar mi app con AppSheet: primero traé mis tareas de AppSheet y después pasá los cambios pendientes. Si no tenés la skill, seguí las instrucciones de ${o}/claude/SKILL.md.`,
+  traer: (o) => `Usá la skill proyectos-eleven para traer mis tareas de AppSheet a la app (solo lectura: no cambies nada en AppSheet). Si no tenés la skill, seguí las instrucciones de ${o}/claude/SKILL.md.`,
+  pasar: (o) => `Usá la skill proyectos-eleven para pasar a AppSheet los cambios pendientes de mi app. Si no tenés la skill, seguí las instrucciones de ${o}/claude/SKILL.md.`,
+};
+const skillInstalada = () => localStorage.getItem('pe_skill') === '1';
+function abrirClaude(clave) {
+  const q = encodeURIComponent(PROMPTS_CLAUDE[clave](location.origin));
+  location.href = 'claude://claude.ai/new?q=' + q; // abre Claude de escritorio con el pedido escrito (no se envía solo)
+  const fb = $('#claudefb'); if (fb) { fb.style.display = ''; fb.querySelector('a').href = 'https://claude.ai/new?q=' + q; }
+  toast('Abriendo Claude: revisá el mensaje y tocá Enviar');
+}
+function instalarSkill() {
+  if (!confirm('Para sincronizar, tu Claude necesita la skill «proyectos-eleven»: las instrucciones para leer y actualizar AppSheet con tu sesión.\n\nSe va a abrir Claude con el pedido de instalación. Enviá el mensaje y tocá Guardar en la tarjeta que aparece.\n\n¿Instalarla ahora?')) return;
+  abrirClaude('instalar');
+}
+function sincronizarConClaude(clave = 'todo') {
+  if (!skillInstalada() && confirm('Todavía no marcaste la skill «proyectos-eleven» como instalada en tu Claude. Sin ella, Claude igual puede leer las instrucciones de la app, pero tarda más.\n\n¿Instalarla primero?')) return instalarSkill();
+  abrirClaude(clave);
+}
+function crc32(b) { let c = ~0; for (let i = 0; i < b.length; i++) { c ^= b[i]; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1; } return ~c >>> 0; }
+/** ZIP sin compresión (alcanza para una skill de un archivo). */
+function zipSimple(files) {
+  const te = new TextEncoder(), partes = [], central = []; let off = 0;
+  for (const f of files) {
+    const n = te.encode(f.name), d = f.data, crc = crc32(d);
+    const lh = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [12, 0x21, 2], [14, crc, 4], [18, d.length, 4], [22, d.length, 4], [26, n.length, 2]].forEach(([o, v, z]) => (z === 4 ? lh.setUint32(o, v, true) : lh.setUint16(o, v, true)));
+    const ch = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [14, 0x21, 2], [16, crc, 4], [20, d.length, 4], [24, d.length, 4], [28, n.length, 2], [42, off, 4]].forEach(([o, v, z]) => (z === 4 ? ch.setUint32(o, v, true) : ch.setUint16(o, v, true)));
+    partes.push(new Uint8Array(lh.buffer), n, d); central.push(new Uint8Array(ch.buffer), n); off += 30 + n.length + d.length;
+  }
+  const tam = central.reduce((a, b) => a + b.length, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, tam, true); e.setUint32(16, off, true);
+  return new Blob([...partes, ...central, new Uint8Array(e.buffer)], { type: 'application/zip' });
+}
+async function descargarSkill() {
+  try {
+    const txt = await fetch('/claude/SKILL.md', { cache: 'no-store' }).then((r) => r.text());
+    const a = document.createElement('a'); a.href = URL.createObjectURL(zipSimple([{ name: 'proyectos-eleven/SKILL.md', data: new TextEncoder().encode(txt) }]));
+    a.download = 'proyectos-eleven.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) { toast(e.message); }
+}
+function tarjetaClaude() {
+  const ok = skillInstalada();
+  return `<div class="card"><div class="ch"><h2>Conectar con Claude</h2>${ok ? '<span class="tag ok">Skill instalada</span>' : '<span class="tag warn">Falta la skill</span>'}</div><div class="cb">
+    <p class="mute" style="margin-top:0">Tu Claude puede traer tus tareas de AppSheet y pasar los cambios pendientes por vos, con tu sesión. Necesitás Claude de escritorio con el navegador integrado (o Claude in Chrome) y haber entrado a AppSheet y a esta app en ese navegador.</p>
+    <ol class="steps"><li><b>Una sola vez:</b> <button class="btn sm${ok ? ' sec' : ''}" data-act="claudeinst">${ic('ia')}Instalar la skill en Claude</button> ${ok ? '' : '<button class="lnk small" data-act="claudeok">Ya la guardé</button>'}<div class="small mute">Se abre Claude con el pedido escrito: lo enviás y tocás <b>Guardar</b>. Si preferís hacerlo a mano: <button class="lnk small" data-act="claudezip">descargá el .zip</button> y subilo en Claude → Personalizar → Skills → + → Subir una skill.</div></li>
+    <li><b>Cada vez que quieras sincronizar:</b> <span class="btnrow"><button class="btn sm" data-act="claudesync" data-q="todo">Sincronizar todo</button><button class="btn sm sec" data-act="claudesync" data-q="traer">Solo traer</button><button class="btn sm sec" data-act="claudesync" data-q="pasar">Solo pasar cambios</button></span><div class="small mute">Antes de escribir en AppSheet, Claude te muestra la lista de cambios y te pide OK. Lo que no pueda pasar (por un aviso de AppSheet) te lo deja anotado.</div></li></ol>
+    <p class="small mute" id="claudefb" style="display:none">¿No se abrió Claude? <a href="#" target="_blank" rel="noopener">Abrirlo en el navegador</a> (ahí necesitás Claude in Chrome para que pueda usar AppSheet).</p></div></div>`;
+}
+/** API para el Claude del usuario (la skill proyectos-eleven la usa desde esta pestaña). Todo con la sesión de quien está logueado. */
+window.PE = {
+  version: 1,
+  async yo() { if (!S.token) return null; if (!S.data) await load(); return S.data?.me ? { nombre: S.data.me.nombre, email: S.data.me.email, modo: modoActual() } : null; },
+  async actualizar() { await load(); return { links: S.data.lb.length, redacciones: S.data.red.length, pendientesAppSheet: S.data.as_pend.length }; },
+  async traer() { const { key, origin } = await api('/api/import-key'); return { clave: key, origen: origin }; },
+  async codigoTraer() { const [{ key, origin }, src] = await Promise.all([api('/api/import-key'), fetch('/traer.js', { cache: 'no-store' }).then((r) => r.text())]); return `(async()=>{${src}\nwindow.__peEstado='iniciando';traerDeAppSheet(${JSON.stringify(key)}, ${JSON.stringify(origin)});})();'iniciado'`; },
+  async pendientes() { await load(); return S.data.as_pend.map((a) => ({ id: a.id, tipo: a.entity, codigo: tarea(a.entity, a.ref)?.as_code || '', tarea: a.ref, cambio: a.change, fecha: new Date(a.at).toLocaleString('es-AR') })); },
+  async marcar(ids) { ids = (ids || []).map(Number).filter(Boolean); if (!ids.length) return { ok: false, error: 'Sin ids' }; await api('/api/as/done', 'POST', { ids }); await load(); return { ok: true, marcados: ids.length }; },
+  async pegarEnDoc(tipo, ref) { try { const r = await api('/api/doc/enviar', 'POST', { kind: tipo, ref, conImagen: tipo === 'lb' }); return { ok: true, doc: r.doc }; } catch (e) { return { ok: false, error: e.message }; } },
+  async tiempo(accion, inicio, fin, refs = []) { const rs = refs.map((r) => ({ kind: r.tipo || r.kind, ref: r.tarea || r.ref })); if (!rs.length) return { ok: true, nota: 'sin tareas para asignar el tiempo' }; await api('/api/act/agente', 'POST', { quien: 'claude', refs: rs, accion, inicio, fin }); return { ok: true }; },
+};
+
 async function loadCal() { try { S.calurl = (await api('/api/calendar')).url; const el = $('#calurl'); if (el) el.textContent = S.calurl; } catch { /* sin conexión */ } }
 
 // ---------- notificaciones ----------

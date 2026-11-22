@@ -1,0 +1,4 @@
+/traer.js
+  Access-Control-Allow-Origin: https://www.appsheet.com
+/claude/*
+  Access-Control-Allow-Origin: *

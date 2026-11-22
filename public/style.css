@@ -143,3 +143,4 @@ ul.hl { list-style: none; margin: 0; padding: 4px 16px 12px; } ul.hl li { displa
 .seg2 { display: flex; background: #f2f4f7; border-radius: 8px; padding: 3px; gap: 3px; }
 .seg2 button { flex: 1; border: 0; background: none; padding: 6px 0; border-radius: 6px; font: 500 12.5px/1 inherit; color: var(--ink2); cursor: pointer; }
 .seg2 button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(16, 24, 40, .1); }
+.btnrow{display:inline-flex;gap:6px;flex-wrap:wrap;vertical-align:middle;margin-left:4px}
