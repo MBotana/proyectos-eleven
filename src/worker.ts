@@ -86,7 +86,7 @@ export async function ensureSchema(env: Env) {
   ready.add(env.DB);
 }
 /** Ajustes de cada usuario (se guardan como "<uid>:<clave>"); el resto es global. */
-const USER_KEYS = new Set(['cal_token', 'timer', 'avisos', 'aviso_hora', 'horas_hora', 'as_sync_at', 'dias_quieta', 'gemini_key', 'gemini_model_texto', 'gemini_model_imagen', 'gas_url', 'gas_secret', 'last_notification', 'import_key']);
+const USER_KEYS = new Set(['cal_token', 'timer', 'avisos', 'aviso_hora', 'horas_hora', 'as_sync_at', 'dias_quieta', 'gemini_key', 'gemini_model_texto', 'gemini_model_imagen', 'gas_url', 'gas_secret', 'last_notification', 'import_key', 'conectar_tok', 'conectar_exp', 'conectado_at']);
 const skey = (env: Env, key: string) => (USER_KEYS.has(key) ? `${uidOf(env)}:${key}` : key);
 async function getS(env: Env, key: string): Promise<string | null> {
   const r = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(skey(env, key)).first();
@@ -96,6 +96,8 @@ async function putS(env: Env, key: string, value: string) {
   await env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(skey(env, key), value).run();
 }
 /** Usuario dueño de un ajuste con ese valor (calendario, clave de importación). */
+/** Link de la app de AppSheet (solo www.appsheet.com/start/…). */
+export function linkAppSheet(v: unknown) { const m = String(v ?? '').trim().match(/^https:\/\/www\.appsheet\.com\/start\/[\w-]{8,80}/); return m ? m[0] : ''; }
 async function userBySetting(env: Env, key: string, value: string): Promise<User | null> {
   if (!value || value.length < 20) return null;
   const r: any = await env.DB.prepare("SELECT key FROM settings WHERE key LIKE ? AND value = ?").bind('%:' + key, value).first();
@@ -106,7 +108,7 @@ async function userById(env: Env, id: string): Promise<User | null> {
   return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico' } : null;
 }
 export const conUsuario = (env: Env, U: User): Env => ({ ...env, U });
-const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '' };
+const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: '' };
 
 // ---------- acceso (una sola cuenta: contraseña) ----------
 const PBKDF2_IT = 100000;
@@ -631,7 +633,9 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       if (m === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
       const U = m === 'POST' ? await userBySetting(env, 'import_key', req.headers.get('x-import-key') ?? '') : null;
       if (!U) return new Response(JSON.stringify({ error: 'No autorizado: volvé a copiar el botón desde Ajustes de la app' }), { status: 401, headers: { ...cors, 'content-type': 'application/json' } });
-      const r = await importAS(conUsuario(env, U), await body());
+      const cuerpo = await body(), link = linkAppSheet(cuerpo.as_url);
+      if (link) await putS(env, 'as_url', link);
+      const r = await importAS(conUsuario(env, U), cuerpo);
       return new Response(JSON.stringify(r), { headers: { ...cors, 'content-type': 'application/json' } });
     }
     // compilado de medios desde la planilla de Google (la abro yo en el navegador con tu sesión de Eleven)
@@ -677,6 +681,15 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       if (!u || typeof b.password !== 'string' || !(await verifyPw(b.password, u.pw))) { await badTry(env); return fail(quien || users.length <= 1 ? 'Usuario o contraseña incorrectos' : 'Escribí tu mail o tu nombre', 401); }
       await putS(env, 'fails', '0'); return json({ token: await newSession(env, u.id) });
     }
+    if (path === '/api/conectar/usar' && m === 'POST') {
+      if (await throttled(env)) return fail('Demasiados intentos. Probá en 15 minutos.', 429);
+      const b = await body(), U2 = await userBySetting(env, 'conectar_tok', str(b.token, 80));
+      if (!U2) { await badTry(env); return fail('Este enlace ya se usó o no existe. Volvé a tocar «Conectar Claude» en la app.', 401); }
+      const e2 = conUsuario(env, U2), exp = Number(await getS(e2, 'conectar_exp'));
+      await putS(e2, 'conectar_tok', ''); await putS(e2, 'conectado_at', String(Date.now()));
+      if (!(exp > Date.now())) return fail('Este enlace venció. Volvé a tocar «Conectar Claude» en la app.', 401);
+      return json({ token: await newSession(env, U2.id), nombre: U2.nombre });
+    }
     if (path === '/api/last-notification' && m === 'GET') {
       const sub: any = await env.DB.prepare('SELECT uid FROM push_subscriptions WHERE endpoint = ?').bind(url.searchParams.get('ep') ?? '').first();
       const U = sub ? await userById(env, sub.uid) : null, n = U ? await getS(conUsuario(env, U), 'last_notification') : null;
@@ -690,6 +703,22 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const token = b64u(rand(18));
       await env.DB.prepare('INSERT INTO invites (token, created_by, created_at) VALUES (?, ?, ?)').bind(token, U.id, Date.now()).run();
       return json({ token, link: `${url.origin}/?invitacion=${token}` });
+    }
+    if (path === '/api/conectar' && m === 'POST') {
+      const tok = b64u(rand(24)); await putS(env, 'conectar_tok', tok); await putS(env, 'conectar_exp', String(Date.now() + 60 * 60000));
+      return json({ token: tok, link: `${url.origin}/?conectar=${tok}`, as_url: (await getS(env, 'as_url')) || '' });
+    }
+    // objetivos mensuales por proyecto (los lee Claude del reporte de seguimiento, solo lectura)
+    if (path === '/api/objetivos' && m === 'POST') {
+      const b = await body(); if (!Array.isArray(b.items)) return fail('Faltan los objetivos');
+      let n = 0;
+      for (const it of b.items.slice(0, 200)) {
+        const code = str(it.code, 40), q = numOrNull(it.piezasMes); if (q === null) continue;
+        const row: any = await env.DB.prepare('SELECT tipo, params FROM projects WHERE uid = ? AND code = ?').bind(U.id, code).first(); if (!row) continue;
+        const pr = JSON.parse(row.params || '{}');
+        await env.DB.prepare('UPDATE projects SET params = ? WHERE uid = ? AND code = ?').bind(JSON.stringify({ ...pr, piezasMes: q, ...(row.tipo === 'LIN' ? { linksMes: q } : {}), objetivosAt: hoyEn(TZ) }), U.id, code).run(); n++;
+      }
+      return json({ ok: true, actualizados: n });
     }
     // modo predeterminado de cada usuario (Líder o Técnico): lo elige quien administra
     if (path === '/api/usuarios/modo' && m === 'POST') {
@@ -799,7 +828,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const b = await body(); if (!Array.isArray(b.projects)) return fail('Faltan los proyectos');
       for (const p of b.projects) {
         const prev = JSON.parse(((await env.DB.prepare('SELECT params FROM projects WHERE uid = ? AND code = ?').bind(U.id, str(p.code, 40)).first()) as any)?.params || '{}');
-        const pr = p.params || {}, params = { drMin: numOrNull(pr.drMin), trafMin: numOrNull(pr.trafMin), precioMaxUSD: numOrNull(pr.precioMaxUSD), repDias: numOrNull(pr.repDias), palabrasMin: numOrNull(pr.palabrasMin), linksMes: numOrNull(pr.linksMes), dominio: str(pr.dominio, 120), paises: str(pr.paises, 120), servicio: str(pr.servicio, 60) };
+        const pr = p.params || {}, params = { drMin: numOrNull(pr.drMin), trafMin: numOrNull(pr.trafMin), precioMaxUSD: numOrNull(pr.precioMaxUSD), repDias: numOrNull(pr.repDias), palabrasMin: numOrNull(pr.palabrasMin), linksMes: numOrNull(pr.linksMes), piezasMes: numOrNull(pr.piezasMes ?? pr.linksMes), dominio: str(pr.dominio, 120), paises: str(pr.paises, 120), servicio: str(pr.servicio, 60) };
         await env.DB.prepare('UPDATE projects SET cliente = ?, active = ?, params = ? WHERE uid = ? AND code = ?').bind(str(p.cliente, 80), p.active ? 1 : 0, JSON.stringify({ ...prev, ...params, ...(pr.costos && typeof pr.costos === 'object' ? { costos: pr.costos, costosAt: hoyEn(TZ) } : {}), ...(numOrNull(pr.presupuestoMensualARS) !== null ? { presupuestoMensualARS: numOrNull(pr.presupuestoMensualARS), costoObjetivo: numOrNull(pr.costoObjetivo) ?? 30 } : {}) }), U.id, str(p.code, 40)).run();
       }
       return json({ ok: true });
@@ -820,7 +849,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     }
     if (path === '/api/settings' && m === 'POST') {
       const b = await body();
-      for (const k of Object.keys(PUBLIC_SETTINGS)) if (k in b) await putS(env, k, str(b[k], 300));
+      for (const k of Object.keys(PUBLIC_SETTINGS)) if (k in b && k !== 'as_url' && k !== 'conectado_at') await putS(env, k, str(b[k], 300));
+      if ('as_url' in b && U.admin) { const v = linkAppSheet(b.as_url); if (v || !b.as_url) await putS(env, 'as_url', v); }
       return json({ ok: true });
     }
     if (path === '/api/calendar' && m === 'GET') return json({ url: `${url.origin}/cal/${await getS(env, 'cal_token')}.ics` });

@@ -144,3 +144,23 @@ ul.hl { list-style: none; margin: 0; padding: 4px 16px 12px; } ul.hl li { displa
 .seg2 button { flex: 1; border: 0; background: none; padding: 6px 0; border-radius: 6px; font: 500 12.5px/1 inherit; color: var(--ink2); cursor: pointer; }
 .seg2 button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(16, 24, 40, .1); }
 .btnrow{display:inline-flex;gap:6px;flex-wrap:wrap;vertical-align:middle;margin-left:4px}
+/* bienvenida guiada */
+.login{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;height:auto;min-height:100vh;padding:24px 0;box-sizing:border-box}
+.onb .box{width:520px;max-width:92vw}
+.onb .box h1{margin-top:0}
+.onb-pasos{display:flex;gap:6px;list-style:none;padding:0;margin:0;flex-wrap:wrap;justify-content:center}
+.onb-pasos li{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);padding:6px 12px 6px 6px;border-radius:999px;background:#fff;border:1px solid var(--line)}
+.onb-pasos li span{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--line);color:var(--mute);font-weight:600;font-size:12px}
+.onb-pasos li.on{color:var(--ink);border-color:var(--acc)}.onb-pasos li.on span{background:var(--acc);color:#fff}
+.onb-pasos li.ok span{background:var(--ok-bg);color:var(--ok)}
+.onb-inst{width:360px;max-width:92vw}
+.onb-ops{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
+.onb-op{position:relative;text-align:left;border:1px solid var(--line);border-radius:10px;background:#fff;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:4px;font:inherit}
+.onb-op:hover{border-color:var(--acc);background:var(--acc-bg)}
+.onb-op span{font-size:13px;color:var(--mute)}.onb-op i{font-style:normal;align-self:flex-start;margin-bottom:2px}
+.onb-check{list-style:none;padding:0;margin:16px 0;display:flex;flex-direction:column;gap:12px}
+.onb-check li{display:flex;gap:10px;align-items:flex-start}
+.onb-check li>span{flex:0 0 22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--line);color:var(--mute);font-weight:700}
+.onb-check li.ok>span{background:var(--ok-bg);color:var(--ok)}
+.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:gira .8s linear infinite;vertical-align:-1px}
+@keyframes gira{to{transform:rotate(360deg)}}

@@ -317,3 +317,26 @@ test('modo líder: semáforo y resumen por proyecto', async () => {
   const r = resumenProyecto(p, { lb, red: [] }, '2026-11', hoy);
   assert.deepEqual([r.total, r.terminadas, r.porVencer, r.atrasadasDeOtrosMeses, r.pctPresupuesto, r.objetivo], [2, 1, 1, 1, 30, 11]);
 });
+
+test('conectar Claude: enlace de un solo uso, objetivos del reporte y link de AppSheet', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { nombre: 'Martín Botana', email: 'm@x.com', password: 'clave-segura-1' })).j.token;
+  assert.equal((await call(env, '/api/conectar', 'POST')).status, 401);
+  const c = (await call(env, '/api/conectar', 'POST', {}, tok)).j;
+  assert.match(c.link, /\?conectar=/);
+  const u = await call(env, '/api/conectar/usar', 'POST', { token: c.token });
+  assert.equal(u.status, 200); assert.ok(u.j.token); assert.equal(u.j.nombre, 'Martín Botana');
+  assert.equal((await call(env, '/api/conectar/usar', 'POST', { token: c.token })).status, 401, 'no se puede reusar');
+  let d = (await call(env, '/api/data', 'GET', undefined, u.j.token)).j;
+  assert.ok(Number(d.settings.conectado_at) > 0);
+  // objetivos: LIN copia a linksMes; RED queda en piezasMes; proyectos ajenos se ignoran
+  const o = (await call(env, '/api/objetivos', 'POST', { items: [{ code: 'XUB-LIN-1', piezasMes: 6 }, { code: 'LAV-RED-5', piezasMes: 30 }, { code: 'MER-LIN-9', piezasMes: 60 }] }, tok)).j;
+  assert.equal(o.actualizados, 2);
+  d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  const p = (code: string) => d.projects.find((x: any) => x.code === code).params;
+  assert.equal(p('XUB-LIN-1').linksMes, 6); assert.equal(p('LAV-RED-5').piezasMes, 30); assert.ok(p('LAV-RED-5').objetivosAt);
+  // link de AppSheet: solo el admin y solo appsheet.com/start
+  await call(env, '/api/settings', 'POST', { as_url: 'https://evil.com/start/x' }, tok);
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, '');
+  await call(env, '/api/settings', 'POST', { as_url: 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb#appName=x' }, tok);
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb');
+});

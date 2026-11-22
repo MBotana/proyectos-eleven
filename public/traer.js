@@ -50,7 +50,7 @@ async function traerDeAppSheet(K, O) {
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
       tot.lb += j.lb || 0; tot.red += j.red || 0; tot.nuevos.push(...(j.proyectosNuevos || []));
     };
-    for (let i = 0; i < Math.max(lb.length, 1); i += 150) await enviar({ lb: lb.slice(i, i + 150), red: [], proyectos, clientes });
+    for (let i = 0; i < Math.max(lb.length, 1); i += 150) await enviar({ lb: lb.slice(i, i + 150), red: [], proyectos, clientes, as_url: location.origin + location.pathname });
     for (let i = 0; i < red.length; i += 150) { msg(`enviando redacciones ${i + 1}–${Math.min(i + 150, red.length)} de ${red.length}…`); await enviar({ lb: [], red: red.slice(i, i + 150) }); }
     box.style.background = '#067647';
     msg(`listo: ${tot.lb} links y ${tot.red} redacciones de tus proyectos${tot.nuevos.length ? ` · proyectos nuevos: ${tot.nuevos.join(', ')}` : ''}. Volvé a la app y tocá Actualizar.`);
