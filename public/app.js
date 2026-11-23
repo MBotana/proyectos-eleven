@@ -1161,7 +1161,8 @@ const qs = new URLSearchParams(location.search);
   if (S.token) {
     try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); tomarUsuario(); } catch { /* nada */ }
     try { S.syncEsperando = JSON.parse(sessionStorage.getItem('pe_sync') || 'null'); } catch { /* nada */ } esperarSync();
-    if (S.data) render(); await load();
+    if (S.data) { try { render(); } catch { S.data = null; localStorage.removeItem('pe_cache'); } } // una copia vieja que no se puede mostrar no frena el arranque
+    await load();
     if (qs.get('invitacion')) { toast('Ya tenés una sesión abierta: para usar la invitación, cerrá sesión en Ajustes o abrí el link en otro navegador.'); }
     if (qs.get('nuevo')) history.replaceState(null, '', '/');
     return;
