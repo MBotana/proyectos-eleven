@@ -124,7 +124,7 @@ function esperarSync() {
     if (!S.syncEsperando || Date.now() - S.syncEsperando.desde > 30 * 60000) return terminarEspera();
     await load();
     const s = syncInfo();
-    if (s.at > S.syncEsperando.antes) { terminarEspera(); toast(s.info.verificado === false ? 'Llegaron datos, pero no pasaron la verificación' : `Datos de AppSheet actualizados: ${s.info.links} links y ${s.info.redacciones} redacciones`); }
+    if (s.at > S.syncEsperando.antes) { localStorage.setItem('pe_skill', '1'); terminarEspera(); toast(s.info.verificado === false ? 'Llegaron datos, pero no pasaron la verificación' : `Datos de AppSheet actualizados: ${s.info.links} links y ${s.info.redacciones} redacciones`); }
   }, 10000);
 }
 function terminarEspera() { clearInterval(S.syncPoll); S.syncEsperando = null; sessionStorage.removeItem('pe_sync'); render(); }
@@ -992,11 +992,12 @@ document.addEventListener('keydown', (ev) => {
 });
 
 // ---------- Claude (sincronizar con AppSheet desde el Claude de cada uno) ----------
-const datosConexion = (c) => (c.link ? `\n- Enlace para abrir mi app con mi sesión (un solo uso, vence en 1 hora): ${c.link}` : '') + `\n- AppSheet: ${c.as_url || 'la app «Eleven - Operaciones» (buscala en appsheet.com si no la tenés abierta)'}`;
+const AS_URL_ELEVEN = 'https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046?platform=desktop#appName=AEApp-Production-609550914-25-02-20&view=Operations';
+const datosConexion = (c) => (c.link ? `\n- Enlace para abrir mi app con mi sesión (un solo uso, vence en 1 hora): ${c.link}` : '') + `\n- AppSheet (abrí este link completo; si te pide iniciar sesión, cuando entre volvé a abrirlo): ${c.as_url || AS_URL_ELEVEN}`;
 const PROMPTS_CLAUDE = {
   bienvenida: (o, c) => `Hola Claude. Quiero dejar conectada mi app Proyectos Eleven con mi AppSheet. Leé ${o}/claude/SKILL.md (si todavía no tengo la skill «proyectos-eleven», proponémela para guardar) y seguí la sección «Primera vez» con estos datos:${datosConexion(c)}`,
   instalar: (o) => `Instalá la skill "proyectos-eleven" para poder sincronizar mi app Proyectos Eleven con AppSheet. Leé el archivo ${o}/claude/SKILL.md y proponémelo como skill para guardar, con ese mismo nombre y contenido. Si desde este chat no se pueden guardar skills, decime cómo subirlo.`,
-  sincronizar: (o, c) => `Usá la skill proyectos-eleven para sincronizar mi app Proyectos Eleven con AppSheet y el reporte de seguimiento (solo lectura: no cambies nada en AppSheet ni en el reporte). Si no tenés la skill, seguí las instrucciones de ${o}/claude/SKILL.md.${datosConexion(c)}`,
+  sincronizar: (o, c) => `Sincronizá mi app Proyectos Eleven con AppSheet y el reporte de seguimiento (solo lectura: no cambies nada en AppSheet ni en el reporte). Usá la skill proyectos-eleven; si no la tenés guardada, leé ${o}/claude/SKILL.md, proponémela para guardar y seguí con la sincronización sin esperar.${datosConexion(c)}`,
 };
 const skillInstalada = () => localStorage.getItem('pe_skill') === '1';
 const viaClaude = () => localStorage.getItem('pe_claude_via') || 'escritorio';
@@ -1014,10 +1015,8 @@ function instalarSkill() {
   if (!confirm('Para sincronizar, tu Claude necesita la skill «proyectos-eleven»: las instrucciones para leer y actualizar AppSheet con tu sesión.\n\nSe va a abrir Claude con el pedido de instalación. Enviá el mensaje y tocá Guardar en la tarjeta que aparece.\n\n¿Instalarla ahora?')) return;
   abrirClaude('instalar');
 }
-function sincronizarConClaude(clave = 'sincronizar') {
-  if (!skillInstalada() && confirm('Todavía no marcaste la skill «proyectos-eleven» como instalada en tu Claude. Sin ella, Claude igual puede leer las instrucciones de la app, pero tarda más.\n\n¿Instalarla primero?')) return instalarSkill();
-  abrirClaude(clave);
-}
+/** Sincronizar siempre abre Claude con el pedido de sincronizar: si no tiene la skill, el mismo pedido le dice de dónde leerla y que te la proponga. */
+function sincronizarConClaude(clave = 'sincronizar') { abrirClaude(clave); }
 function crc32(b) { let c = ~0; for (let i = 0; i < b.length; i++) { c ^= b[i]; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1; } return ~c >>> 0; }
 /** ZIP sin compresión (alcanza para una skill de un archivo). */
 function zipSimple(files) {

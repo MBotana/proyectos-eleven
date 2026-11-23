@@ -6,7 +6,7 @@ description: Sincroniza a pedido la app Proyectos Eleven (versión líder, solo 
 # Proyectos Eleven ← AppSheet (versión líder)
 
 - **APP**: https://proyectos-eleven.martinbotana.workers.dev
-- **AppSheet**: la app "Eleven - Operaciones" (www.appsheet.com). El mensaje del usuario suele traer el link.
+- **AppSheet**: la app "Eleven - Operaciones". Link completo (usá el del mensaje si trae otro): https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046?platform=desktop#appName=AEApp-Production-609550914-25-02-20&view=Operations
 - **Reporte**: https://datastudio.google.com/u/0/reporting/21888fb7-9f40-4059-98ea-e9a1c198eb08/page/73rOF
 
 Todo se hace en el navegador con **las sesiones del usuario** (el navegador integrado de Claude de escritorio o Claude in Chrome).
@@ -24,11 +24,16 @@ Todo se hace en el navegador con **las sesiones del usuario** (el navegador inte
 1. Abrí APP en una pestaña. Si el mensaje trae un "enlace para abrir mi app", abrí **ese** enlace.
 2. Con la herramienta de JavaScript, en APP: `await PE.yo()`. Si `PE` no existe, recargá una vez. Si responde `null`, pedile que toque **Sincronizar** en la app para mandarte un enlace nuevo.
 3. Guardá la hora de inicio: `window.__inicio = Date.now()`.
-4. Abrí AppSheet en otra pestaña (el link del mensaje). Si pide iniciar sesión, pedile que entre con su cuenta de Eleven y esperá su aviso.
+4. Abrí AppSheet en otra pestaña con el **link completo** (tiene `#appName=…`; nunca abras `appsheet.com` a secas). Si pide iniciar sesión, pedile que entre con su cuenta de Eleven y esperá su aviso.
+5. Comprobá que quedó abierta la app y no la portada de AppSheet (después de iniciar sesión, AppSheet suele llevar a la portada):
+   ```js
+   ({ enLaApp: /appName=AEApp-Production/.test(location.hash) && /Eleven/.test(document.title), url: location.href })
+   ```
+   Si `enLaApp` es `false`, volvé a abrir el link completo en esa misma pestaña y comprobá otra vez. Si sigue sin abrir, contale al usuario qué se ve y no sigas.
 
-## Primera vez (cuando el mensaje lo pide)
+## Primera vez, o si no tenés esta skill guardada
 
-1. Si todavía no tiene esta skill guardada, proponésela para guardar (mismo nombre y contenido que este archivo) y seguí.
+1. Proponésela para guardar (mismo nombre y contenido que este archivo) y **seguí sin esperar** a que la guarde.
 2. Hacé **Sincronizar** completo. No preguntes nada más: el usuario ya lo pidió.
 
 ## Sincronizar
@@ -98,7 +103,7 @@ window.__peSync = { estado: 'leyendo', paso: 'empezando', leidas: {} };
       const n = Math.max(1, Math.ceil(l.filas.length / 150));
       for (let i = 0; i < n; i++) {
         const r = await fetch(ORIGEN + '/api/sync/lote', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sync-key': CLAVE },
-          body: JSON.stringify({ sid: SID, parte, lectura, seq: i, ultimo: i === n - 1, encabezado: l.encabezado, filas: l.filas.slice(i * 150, (i + 1) * 150), meta: { as_email } }) });
+          body: JSON.stringify({ sid: SID, parte, lectura, seq: i, ultimo: i === n - 1, encabezado: l.encabezado, filas: l.filas.slice(i * 150, (i + 1) * 150), meta: { as_email, as_url: location.href } }) });
         const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
       }
       E.leidas[parte + lectura] = l.filas.length;

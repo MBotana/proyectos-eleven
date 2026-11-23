@@ -293,8 +293,13 @@ test('conectar Claude: enlace de un solo uso, objetivos del reporte y link de Ap
   // link de AppSheet: solo el admin y solo appsheet.com/start
   await call(env, '/api/settings', 'POST', { as_url: 'https://evil.com/start/x' }, tok);
   assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, '');
-  await call(env, '/api/settings', 'POST', { as_url: 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb#appName=x' }, tok);
-  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb');
+  // sin la app (#appName) el link abre la portada de appsheet.com: se rechaza, y a Claude se le da el link completo de Eleven - Operaciones
+  await call(env, '/api/settings', 'POST', { as_url: 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb' }, tok);
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, '');
+  assert.match((await call(env, '/api/conectar', 'POST', {}, tok)).j.as_url, /^https:\/\/www\.appsheet\.com\/start\/476e1e19-c39a-4544-b72d-14f98b35c046\?platform=desktop#appName=AEApp-Production-609550914-25-02-20&view=Operations$/);
+  await call(env, '/api/settings', 'POST', { as_url: 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb?platform=desktop#appName=AEApp-Prueba-1&view=Tasks&vss=xyz' }, tok);
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb?platform=desktop#appName=AEApp-Prueba-1&view=Operations');
+  assert.equal((await call(env, '/api/conectar', 'POST', {}, tok)).j.as_url, 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb?platform=desktop#appName=AEApp-Prueba-1&view=Operations');
 });
 
 test('alta solo con mail: el nombre sale del mail y después de AppSheet', async () => {
@@ -327,7 +332,7 @@ async function sincronizar(env: any, tok: string, o: { proy: any[]; lb: any[]; r
   const s = (await call(env, '/api/sync/iniciar', 'POST', {}, tok)).j;
   for (const lectura of [1, 2]) {
     await lote(env, s.sid, s.clave, 'lbProy', lectura, H_PROY, o.proy);
-    await lote(env, s.sid, s.clave, 'lb', lectura, o.hLb || H_LB, lectura === 2 && o.lb2 ? o.lb2 : o.lb, { as_email: o.email || 'martin.botana@agenciaeleven.com' });
+    await lote(env, s.sid, s.clave, 'lb', lectura, o.hLb || H_LB, lectura === 2 && o.lb2 ? o.lb2 : o.lb, { as_email: o.email || 'martin.botana@agenciaeleven.com', as_url: 'https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046?platform=desktop#appName=AEApp-Production-609550914-25-02-20&view=Link_Building&vss=' });
     await lote(env, s.sid, s.clave, 'red', lectura, H_RED, o.red);
     if (o.objLin) await lote(env, s.sid, s.clave, 'objLin', lectura, H_OBJ, o.objLin, undefined, 'https://datastudio.google.com');
     if (o.objRed) await lote(env, s.sid, s.clave, 'objRed', lectura, H_OBJ, o.objRed, undefined, 'https://datastudio.google.com');
@@ -362,6 +367,7 @@ test('sincronización: trae solo lo tuyo, con objetivos, y verifica lo guardado'
   const p = (c: string) => d.projects.find((x: any) => x.code === c);
   assert.equal(p('GAL-LIN-1').params.linksMes, 3); assert.equal(p('GAL-LIN-1').params.presupuestoMensual, 1331469); assert.equal(p('GAL-RED-1').params.piezasMes, 8); assert.equal(p('GAL-RED-1').cliente, 'Galicia Seguros');
   assert.ok(Number(d.settings.as_sync_at) > 0); assert.equal(JSON.parse(d.settings.as_sync_info).verificado, true);
+  assert.equal(d.settings.as_url, 'https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046?platform=desktop#appName=AEApp-Production-609550914-25-02-20&view=Operations', 'guarda el link completo de la app');
   // una sincronización aplicada no se puede volver a aplicar
   assert.equal((await call(env, '/api/sync/aplicar', 'POST', { sid: ap.j.sid }, tok)).status, 409);
 });

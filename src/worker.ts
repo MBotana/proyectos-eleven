@@ -98,7 +98,12 @@ async function putS(env: Env, key: string, value: string) {
 }
 /** Usuario dueño de un ajuste con ese valor (calendario, clave de importación). */
 /** Link de la app de AppSheet (solo www.appsheet.com/start/…). */
-export function linkAppSheet(v: unknown) { const m = String(v ?? '').trim().match(/^https:\/\/www\.appsheet\.com\/start\/[\w-]{8,80}/); return m ? m[0] : ''; }
+/** Link completo de Eleven - Operaciones. Sin el "#appName=…", AppSheet abre su portada (appsheet.com) en vez de la app, sobre todo después de iniciar sesión. */
+export const AS_URL_ELEVEN = 'https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046?platform=desktop#appName=AEApp-Production-609550914-25-02-20&view=Operations';
+export function linkAppSheet(v: unknown) {
+  const s = String(v ?? '').trim(), m = s.match(/^https:\/\/www\.appsheet\.com\/start\/([\w-]{8,80})/), app = (s.match(/[#&?]appName=([\w.-]{3,120})/) || [])[1];
+  return m && app ? `https://www.appsheet.com/start/${m[1]}?platform=desktop#appName=${app}&view=Operations` : '';
+}
 async function userBySetting(env: Env, key: string, value: string): Promise<User | null> {
   if (!value || value.length < 20) return null;
   const r: any = await env.DB.prepare("SELECT key FROM settings WHERE key LIKE ? AND value = ?").bind('%:' + key, value).first();
@@ -304,7 +309,7 @@ export async function syncPreparar(env: Env, sid: string) {
     objetivos: { leidos: !!(fotos.objLin || fotos.objRed), actualizados: Object.keys(obj).length, sinObjetivo },
     borradas: [...dLb.borradas, ...dRed.borradas].slice(0, 30), vaciados: [...dLb.vaciados, ...dRed.vaciados].slice(0, 30) };
   await env.DB.prepare('UPDATE sync_runs SET estado = ?, informe = ? WHERE sid = ?').bind('revisado', JSON.stringify(informe), run.sid).run();
-  return { informe, fotoLb, fotoRed, quiero, fotos, obj, actProy, yo };
+  return { informe, fotoLb, fotoRed, quiero, fotos, obj, actProy, yo, asUrl: linkAppSheet(meta.as_url) };
 }
 
 /** Aplica la foto revisada de una sola vez (lote atómico) y después compara lo guardado con lo leído. */
@@ -312,7 +317,7 @@ export async function syncAplicar(env: Env, sid: string, confirmar = false) {
   const p = await syncPreparar(env, sid), inf: any = p.informe;
   if (!inf.ok) throw httpErr('La lectura tiene errores: no se aplicó nada.', 409, inf);
   if (inf.requiereConfirmacion && !confirmar) throw httpErr('Hay cambios que necesitan tu confirmación: no se aplicó nada.', 409, inf);
-  const { fotoLb, fotoRed, quiero, fotos, obj, actProy, yo } = p as Required<typeof p>;
+  const { fotoLb, fotoRed, quiero, fotos, obj, actProy, yo, asUrl } = p as Required<typeof p>;
   const uid = uidOf(env), now = Date.now(), hoy = hoyEn(TZ), st: any[] = [], P = (sql: string, ...a: unknown[]) => st.push(env.DB.prepare(sql).bind(...a));
   // proyectos
   const prev = new Map(actProy.map((x: any) => [x.code, JSON.parse(x.params || '{}')]));
@@ -350,6 +355,8 @@ export async function syncAplicar(env: Env, sid: string, confirmar = false) {
   const info = { at: now, links: fotoLb.length, redacciones: fotoRed.length, proyectos: quiero.size, objetivos: inf.objetivos.leidos ? hoy : '' };
   const set = (k: string, v: string) => P('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', `${uid}:${k}`, v);
   set('as_sync_at', String(now)); set('as_sync_info', JSON.stringify(info));
+  // el link completo de la app de AppSheet que se acaba de leer (para que Claude la abra directo la próxima vez)
+  if (asUrl) P("INSERT INTO settings (key, value) VALUES ('as_url', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", asUrl);
   P("UPDATE sync_runs SET estado = 'aplicado' WHERE sid = ?", sid);
   P('DELETE FROM sync_stage WHERE sid = ?', sid);
   if (env.DB.batch) await env.DB.batch(st); else for (const s of st) await s.run();
@@ -710,7 +717,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const parte = b.parte as Parte, lectura = Number(b.lectura), seq = Number(b.seq);
       if (!PARTES.includes(parte) || ![1, 2].includes(lectura) || !Number.isInteger(seq) || seq < 0 || seq > 400 || !Array.isArray(b.encabezado) || b.encabezado.length > 80 || !Array.isArray(b.filas) || b.filas.length > 600)
         return resp({ error: 'Lote inválido' }, 400);
-      const lote: Lote = { parte, lectura, seq, ultimo: !!b.ultimo, encabezado: b.encabezado.map((x: unknown) => str(x, 120)), filas: b.filas.map((f: any) => ({ ...(f && f.g !== undefined ? { g: str(f.g, 60) } : {}), c: Array.isArray(f?.c) ? f.c.slice(0, 80).map((x: unknown) => str(x, 600)) : null })), meta: b.meta && typeof b.meta === 'object' ? { as_email: str(b.meta.as_email, 120) } : undefined };
+      const lote: Lote = { parte, lectura, seq, ultimo: !!b.ultimo, encabezado: b.encabezado.map((x: unknown) => str(x, 120)), filas: b.filas.map((f: any) => ({ ...(f && f.g !== undefined ? { g: str(f.g, 60) } : {}), c: Array.isArray(f?.c) ? f.c.slice(0, 80).map((x: unknown) => str(x, 600)) : null })), meta: b.meta && typeof b.meta === 'object' ? { as_email: str(b.meta.as_email, 120), as_url: str(b.meta.as_url, 400) } : undefined };
       if (seq === 0) await env.DB.prepare('DELETE FROM sync_stage WHERE sid = ? AND parte = ? AND lectura = ?').bind(run.sid, parte, lectura).run();
       await env.DB.prepare('INSERT OR REPLACE INTO sync_stage (sid, parte, lectura, seq, data) VALUES (?, ?, ?, ?, ?)').bind(run.sid, parte, lectura, seq, JSON.stringify(lote)).run();
       return resp({ ok: true, recibidas: lote.filas.length });
@@ -783,7 +790,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     }
     if (path === '/api/conectar' && m === 'POST') {
       const tok = b64u(rand(24)); await putS(env, 'conectar_tok', tok); await putS(env, 'conectar_exp', String(Date.now() + 60 * 60000));
-      return json({ token: tok, link: `${url.origin}/?conectar=${tok}`, as_url: (await getS(env, 'as_url')) || '' });
+      return json({ token: tok, link: `${url.origin}/?conectar=${tok}`, as_url: linkAppSheet(await getS(env, 'as_url')) || AS_URL_ELEVEN });
     }
     // sincronización a pedido: iniciar → (AppSheet y reporte mandan sus lecturas) → revisar → aplicar
     if (path === '/api/sync/iniciar' && m === 'POST') {
