@@ -47,7 +47,7 @@ Devuelve `{ sid, clave, origen }`. Vence en 1 hora.
 
 ### 2. Leer AppSheet (pestaña AppSheet)
 
-**Poné la pestaña de AppSheet al frente** (AppSheet no dibuja las tablas en una pestaña de fondo) y ejecutá este código **tal cual**, reemplazando solo `SID`, `CLAVE` y `ORIGEN` por los valores del paso 1. No esperes el resultado: tarda de 2 a 5 minutos.
+**Poné la pestaña de AppSheet al frente** (AppSheet no dibuja las tablas en una pestaña de fondo) y ejecutá este código **tal cual**, reemplazando solo `SID`, `CLAVE` y `ORIGEN` por los valores del paso 1. No esperes el resultado: tarda alrededor de 1 minuto.
 
 ```js
 {
@@ -81,20 +81,26 @@ window.__peSync = { estado: 'leyendo', paso: 'empezando', leidas: {} };
       const sc = t.tv.querySelector('.TableView__list') || t.tv, filas = new Map();
       sc.scrollTop = 0; await espera(1000);
       let quietas = 0, ultimo = null, vueltas = 0;
-      while (quietas < 4 && vueltas++ < 5000) {
+      const firma = () => { const r = sc.querySelectorAll('.TableViewRow'); return r.length ? r[0].innerText + '|' + r[r.length - 1].innerText : ''; };
+      while (quietas < 3 && vueltas++ < 5000) {
         visible();
         let grupo = null;
         for (const el of sc.querySelectorAll('.GroupedHeaderRow, .TableViewRow')) {
           if (el.classList.contains('GroupedHeaderRow')) { grupo = el.innerText.trim(); continue; }
-          const c = [...el.children].map((x) => x.innerText.trim()), k = c[ic];
+          let c = [...el.children].map((x) => x.innerText.trim()); const k = c[ic];
           if (!k || !T.re.test(k)) continue;
           if (T.grupo && grupo === null) grupo = filas.has(k) ? filas.get(k).g : ultimo;
-          const f = T.grupo ? { g: grupo || '', c } : { c }, prev = filas.get(k);
-          if (prev && JSON.stringify(prev) !== JSON.stringify(f)) throw new Error(k + ' cambió en medio de la lectura (la tabla todavía estaba cargando). Volvé a sincronizar.');
+          let f = T.grupo ? { g: grupo || '', c } : { c }; const prev = filas.get(k);
+          if (prev && JSON.stringify(prev) !== JSON.stringify(f)) { // la fila se estaba redibujando: se vuelve a leer una vez ya asentada
+            await espera(300); c = [...el.children].map((x) => x.innerText.trim()); if (c[ic] !== k) continue;
+            f = T.grupo ? { g: grupo || '', c } : { c };
+          }
           filas.set(k, f); if (T.grupo) ultimo = grupo;
         }
-        const antes = sc.scrollTop; sc.scrollTop += Math.max(40, sc.clientHeight * fraccion); await espera(450);
-        quietas = sc.scrollTop === antes ? quietas + 1 : 0;
+        // casi una pantalla por paso; espera solo hasta que aparezcan las filas nuevas (no un tiempo fijo)
+        const antes = sc.scrollTop, f0 = firma(); sc.scrollTop += Math.max(40, sc.clientHeight * fraccion);
+        if (sc.scrollTop === antes) { quietas++; await espera(150); continue; }
+        quietas = 0; for (let i = 0; i < 20 && firma() === f0; i++) await espera(30);
       }
       return { encabezado: enc, filas: [...filas.values()] };
     };
@@ -108,7 +114,7 @@ window.__peSync = { estado: 'leyendo', paso: 'empezando', leidas: {} };
       }
       E.leidas[parte + lectura] = l.filas.length;
     };
-    for (const [lectura, fraccion] of [[1, 0.5], [2, 0.3]]) {
+    for (const [lectura, fraccion] of [[1, 0.85], [2, 0.6]]) { // las dos lecturas avanzan distinto, así la segunda confirma a la primera
       await ir('Link_Building', ['lbProy', 'lb']);
       E.paso = `leyendo proyectos (lectura ${lectura})`; await enviar('lbProy', lectura, await leer('lbProy', fraccion));
       E.paso = `leyendo links (lectura ${lectura})`; await enviar('lb', lectura, await leer('lb', fraccion));
@@ -122,7 +128,7 @@ window.__peSync = { estado: 'leyendo', paso: 'empezando', leidas: {} };
 }
 ```
 
-Consultá `window.__peSync` cada 20 segundos hasta que `estado` sea `listo` o `error`. Mientras tanto **no cambies de pestaña ni la minimices**. Si termina en `error`, traé la pestaña al frente y repetí este paso **una vez** (con el mismo `SID`). Si vuelve a fallar, avisale al usuario con el texto del error y no sigas.
+Consultá `window.__peSync` cada 10 segundos hasta que `estado` sea `listo` o `error`. Mientras tanto **no cambies de pestaña ni la minimices**. Si termina en `error`, traé la pestaña al frente y repetí este paso **una vez** (con el mismo `SID`). Si vuelve a fallar, avisale al usuario con el texto del error y no sigas.
 
 ### 3. Leer los objetivos del reporte (pestaña nueva)
 
