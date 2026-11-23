@@ -50,11 +50,7 @@ async function traerDeAppSheet(K, O) {
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
       tot.lb += j.lb || 0; tot.red += j.red || 0; tot.nuevos.push(...(j.proyectosNuevos || []));
     };
-    let as_email = ''; try { as_email = (JSON.parse(localStorage.JeeneeUserInfo || '{}').UserInfo || {}).AuthUserEmail || ''; } catch {}
-    const sinT = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-    const delMail = sinT(as_email.split('@')[0].replace(/[._-]+/g, ' '));
-    const as_nombre = delMail ? ([...lb, ...red].map((r) => r[10]).find((n) => n && sinT(n) === delMail) || '') : '';
-    for (let i = 0; i < Math.max(lb.length, 1); i += 150) await enviar({ lb: lb.slice(i, i + 150), red: [], proyectos, clientes, as_nombre, as_url: location.origin + location.pathname });
+    for (let i = 0; i < Math.max(lb.length, 1); i += 150) await enviar({ lb: lb.slice(i, i + 150), red: [], proyectos, clientes, as_url: location.origin + location.pathname });
     for (let i = 0; i < red.length; i += 150) { msg(`enviando redacciones ${i + 1}–${Math.min(i + 150, red.length)} de ${red.length}…`); await enviar({ lb: [], red: red.slice(i, i + 150) }); }
     box.style.background = '#067647';
     msg(`listo: ${tot.lb} links y ${tot.red} redacciones de tus proyectos${tot.nuevos.length ? ` · proyectos nuevos: ${tot.nuevos.join(', ')}` : ''}. Volvé a la app y tocá Actualizar.`);
