@@ -99,9 +99,9 @@ function renderModo() {
 }
 function renderLogin() {
   const alta = S.setup || S.invitacion;
-  const intro = S.invitacion === false ? 'Esta invitación ya se usó o no existe. Pedile un link nuevo a quien te invitó.' : S.invitacion ? 'Te invitaron a Proyectos Eleven. Creá tu cuenta: tu nombre tiene que ser igual al de AppSheet, así la app encuentra tus tareas.' : S.setup ? 'Primera vez: creá tu cuenta.' : 'Ingresá con tu mail (o tu nombre) y tu contraseña.';
+  const intro = S.invitacion === false ? 'Esta invitación ya se usó o no existe. Pedile un link nuevo a quien te invitó.' : S.invitacion ? 'Te invitaron a Proyectos Eleven. Creá tu cuenta con tu mail de Eleven.' : S.setup ? 'Primera vez: creá tu cuenta con tu mail de Eleven.' : 'Ingresá con tu mail (o tu nombre) y tu contraseña.';
   $('#app').innerHTML = `<div class="login">${S.invitacion ? pasosBienvenida(enApp() || localStorage.getItem('pe_instalada') ? 1 : 0) : ''}${S.invitacion && !enApp() ? cajaInstalar() : ''}<form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${intro}</p>
-    ${S.invitacion === false ? '' : alta ? `<label>Nombre (igual que en AppSheet)<input name="nombre" required minlength="3" placeholder="Nombre Apellido" autofocus></label><label>Mail<input name="email" type="email" required autocomplete="email"></label>`
+    ${S.invitacion === false ? '' : alta ? `<label>Mail de Eleven<input name="email" type="email" required autocomplete="email" autofocus></label>`
       : `<label>Mail o nombre<input name="usuario" autocomplete="username" autofocus></label>`}
     ${S.invitacion === false ? '' : `<label>Contraseña<input type="password" name="pw" autocomplete="${alta ? 'new-password' : 'current-password'}" required minlength="8"></label>
     <button class="btn full" style="margin-top:14px">${alta ? 'Crear cuenta y entrar' : 'Entrar'}</button>`}<div class="err" id="lerr"></div></form></div>`;
@@ -911,8 +911,8 @@ document.addEventListener('submit', async (ev) => {
   ev.preventDefault(); const f = ev.target;
   if (f.id === 'loginf') {
     try {
-      const r = S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
-        : S.setup ? await api('/api/setup', 'POST', { nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
+      const r = S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, email: f.email.value, password: f.pw.value })
+        : S.setup ? await api('/api/setup', 'POST', { email: f.email.value, password: f.pw.value })
         : await api('/api/login', 'POST', { usuario: f.usuario.value, password: f.pw.value });
       S.token = r.token; localStorage.setItem('pe_token', r.token); localStorage.removeItem('pe_inv'); S.setup = false; S.invitacion = undefined; history.replaceState(null, '', '/'); $('#app').innerHTML = ''; await load();
     }

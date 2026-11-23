@@ -340,3 +340,13 @@ test('conectar Claude: enlace de un solo uso, objetivos del reporte y link de Ap
   await call(env, '/api/settings', 'POST', { as_url: 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb#appName=x' }, tok);
   assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb');
 });
+
+test('alta solo con mail: el nombre sale del mail y después de AppSheet', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@eleven.com', password: 'clave-segura-1' })).j.token;
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.me.nombre, 'Martin Botana');
+  const key = (await call(env, '/api/import-key', 'GET', undefined, tok)).j.key;
+  const lb = [['GAL-LIN-1-1', '30/11/2026', 'Intervalo', 'Para Enviar', 'a', 'x.com', '', '', '', '', 'Martín Botana', '']];
+  await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': key }, body: JSON.stringify({ lb, red: [], proyectos: ['GAL-LIN-1'], as_nombre: 'Martín Botana' }) }), env as any);
+  const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.me.nombre, 'Martín Botana'); assert.equal(d.lb.length, 1);
+});
