@@ -137,7 +137,8 @@ window.__peRep = { estado: 'leyendo', parte: PARTE };
         const enc = [...hr.querySelectorAll('.colName')].map((c) => c.innerText.trim());
         if (!enc.includes('Proyecto') || !enc.includes('Q. piezas Mensual Plan.') || enc.includes('Mes de Planificación')) continue;
         let root = hr; while (root && !root.querySelector('.row .cell')) root = root.parentElement;
-        if (root) return { enc, root };
+        // solo la tabla de esta página: sus códigos tienen que ser del tipo que corresponde (LIN o RED)
+        if (root && [...root.querySelectorAll('.row .cell')].some((c) => (PARTE === 'objRed' ? /^[A-Z0-9]{2,5}-RED-/ : /^[A-Z0-9]{2,5}-LIN-/).test(c.innerText.trim()))) return { enc, root };
       }
       return null;
     };
