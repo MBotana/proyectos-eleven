@@ -62,6 +62,7 @@ async function actualizar() {
 /** Abre la página en una pestaña de fondo, la lee y la cierra. */
 async function leerEn(url, config, que, limite) {
   const tab = await chrome.tabs.create({ url, active: false }); propias.add(tab.id);
+  chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {}); // que Chrome no la descarte (cambiaría su id)
   try {
     for (let i = 0; i < 120; i++) { await espera(1000); const t = await chrome.tabs.get(tab.id); if (t.status === 'complete') break; }
     return await correrEn(tab.id, config, que, limite);
@@ -72,7 +73,7 @@ async function correrEn(tabId, config, que, limite) {
   try {
     if (que === 'AppSheet') { // AppSheet completa el link con el nombre de la app al cargar; si pide iniciar sesión, no hay tabla
       let ok = false;
-      for (let i = 0; i < 90 && !ok; i++) { const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: () => /appName=/.test(location.hash) && !!document.querySelector('.TableView, .TableViewRow') }); ok = !!r?.result; if (!ok) await espera(1000); }
+      for (let i = 0; i < 90 && !ok; i++) { const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: () => /appName=/.test(location.hash) && (!!document.querySelector('.TableView, .TableViewRow') || /Eleven - Operaciones/.test(document.body.innerText)) }); ok = !!r?.result; if (!ok) await espera(1000); }
       if (!ok) return { que, ok: false, texto: 'hay que iniciar sesión en AppSheet' };
     }
     await espera(3000);
