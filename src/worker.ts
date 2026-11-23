@@ -86,7 +86,7 @@ export async function ensureSchema(env: Env) {
   ready.add(env.DB);
 }
 /** Ajustes de cada usuario (se guardan como "<uid>:<clave>"); el resto es global. */
-const USER_KEYS = new Set(['cal_token', 'timer', 'avisos', 'aviso_hora', 'horas_hora', 'as_sync_at', 'dias_quieta', 'gemini_key', 'gemini_model_texto', 'gemini_model_imagen', 'gas_url', 'gas_secret', 'last_notification', 'import_key', 'conectar_tok', 'conectar_exp', 'conectado_at']);
+const USER_KEYS = new Set(['cal_token', 'timer', 'avisos', 'aviso_hora', 'horas_hora', 'as_sync_at', 'dias_quieta', 'gemini_key', 'gemini_model_texto', 'gemini_model_imagen', 'gas_url', 'gas_secret', 'last_notification', 'import_key', 'conectar_tok', 'conectar_exp', 'conectado_at', 'as_email']);
 const skey = (env: Env, key: string) => (USER_KEYS.has(key) ? `${uidOf(env)}:${key}` : key);
 async function getS(env: Env, key: string): Promise<string | null> {
   const r = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(skey(env, key)).first();
@@ -241,11 +241,6 @@ export const asMoney = (s: unknown) => { const t = String(s ?? '').replace(/[^\d
  */
 const sinTildes = (v: unknown) => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 /** Proyectos vigentes que el Reporte de Seguimiento asigna a este usuario como líder (por nombre). */
-async function proyectosQueLidera(env: Env) {
-  const yo = sinTildes(yoOf(env)), hoyMes = hoyEn(TZ).slice(0, 7);
-  const rows = (await env.DB.prepare('SELECT proyecto, lider, cierre, plan_mes FROM reporte').all()).results as any[];
-  return rows.filter((r) => sinTildes(r.lider) === yo && (Number(r.plan_mes) > 0 || !r.cierre || r.cierre === '-' || mesReporte(r.cierre) >= hoyMes)).map((r) => r.proyecto as string);
-}
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
 /** "sept 2026" → "2026-09" (vacío si no se entiende). */
 export function mesReporte(v: unknown) { const m = sinTildes(v).match(/^([a-z]+)\.? (\d{4})$/); if (!m) return ''; const i = MESES.findIndex((x) => m[1].startsWith(x.slice(0, 3))); return i < 0 ? '' : `${m[2]}-${String(i + 1).padStart(2, '0')}`; }
@@ -261,14 +256,16 @@ export async function importReporte(env: Env, b: any) {
     n++;
   }
   if (n) { await putS(env, 'reporte_at', String(now)); }
-  const out = { filas: n, proyectosNuevos: [] as string[] };
-  if (env.U?.alcance === 'lider') {
-    const r = await importAS(env, { lb: [], red: [], proyectos: await proyectosQueLidera(env), clientes: Object.fromEntries((b.filas || []).map((f: any) => [str(f.proyecto, 40).toUpperCase(), str(f.cliente, 80)])), soloProyectos: true });
-    out.proyectosNuevos = r.proyectosNuevos;
-  }
+  const out = { filas: n, proyectosNuevos: [] as string[] }; // el Reporte se cruza con tus proyectos por código (NAV-RED-1…), no por nombre del líder
   return out;
 }
 export async function importAS(env: Env, b: any) {
+  // la cuenta de líder toma su nombre de la sesión de AppSheet (el que figura en las tareas), no del que escribió al registrarse
+  const asNombre = str(b.as_nombre, 80), asEmail = str(b.as_email, 120).toLowerCase();
+  if (env.U && env.U.edicion === 'lider' && asNombre && asNombre !== env.U.nombre) {
+    await env.DB.prepare('UPDATE users SET nombre = ? WHERE id = ?').bind(asNombre, env.U.id).run(); env.U.nombre = asNombre;
+  }
+  if (asEmail) await putS(env, 'as_email', asEmail);
   const now = Date.now(), uid = uidOf(env), yo = yoOf(env);
   const codes = new Set(((await env.DB.prepare('SELECT code FROM projects WHERE uid = ?').bind(uid).all()).results as any[]).map(r => r.code));
   const out = { lb: 0, red: 0, saltadas: 0, proyectosNuevos: [] as string[] };
@@ -277,7 +274,6 @@ export async function importAS(env: Env, b: any) {
   const quiero = new Set<string>([...(Array.isArray(b.proyectos) ? b.proyectos.map((c: unknown) => str(c, 40).toUpperCase()) : []),
     ...(Array.isArray(b.lb) ? b.lb : []).filter((r: any) => sinTildes(str(r[10], 80)) === sinTildes(yo)).map((r: any) => proyDe(r[0])),
     ...(Array.isArray(b.red) ? b.red : []).filter((r: any) => sinTildes(str(r[10], 80)) === sinTildes(yo)).map((r: any) => proyDe(r[0]))]);
-  if (env.U?.alcance === 'lider') for (const c of await proyectosQueLidera(env)) quiero.add(c);
   let orden = codes.size;
   for (const c of quiero) {
     if (codes.has(c) || !/^[A-Z0-9]{2,5}-(LIN|RED)-[\d.]+$/.test(c)) continue;

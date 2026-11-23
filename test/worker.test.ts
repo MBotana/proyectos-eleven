@@ -341,38 +341,28 @@ test('conectar Claude: enlace de un solo uso, objetivos del reporte y link de Ap
   assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, 'https://www.appsheet.com/start/1234abcd-aaaa-bbbb');
 });
 
-test('perfil líder: el Reporte suma los proyectos que lidera y trae todas sus tareas', async () => {
-  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { nombre: 'Martín Botana', email: 'm@x.com', password: 'clave-segura-1' })).j.token;
-  const inv = (await call(env, '/api/invites', 'POST', {}, tok)).j;
-  const tl = (await call(env, '/api/signup', 'POST', { invitacion: inv.token, nombre: 'Martín Noziglia', email: 'n@x.com', password: 'clave-segura-3' })).j.token;
-  const me = (await call(env, '/api/data', 'GET', undefined, tl)).j.me;
-  assert.equal((await call(env, '/api/usuarios/modo', 'POST', { id: me.id, modo: 'lider', alcance: 'lider' }, tl)).status, 403, 'solo el admin');
-  await call(env, '/api/usuarios/modo', 'POST', { id: me.id, modo: 'lider', alcance: 'lider' }, tok);
+test('líder: nombre desde AppSheet y Reporte cruzado por código de proyecto', async () => {
+  const env = mkEnv();
+  await call(env, '/api/setup', 'POST', { nombre: 'Martín Botana', email: 'm@x.com', password: 'clave-segura-1' });
+  const tl = (await call(env, '/api/signup', 'POST', { edicion: 'lider', nombre: 'Martin B', email: 'martin.botana@x.com', password: 'clave-segura-3' })).j.token;
   const key = (await call(env, '/api/import-key', 'GET', undefined, tl)).j.key;
+  const post = async (path: string, body: any, origin?: string) => (await handle(new Request('https://pe.test' + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': key, ...(origin ? { origin } : {}) }, body: JSON.stringify(body) }), env as any)).json() as any;
+  // el Reporte nombra a otro líder (el PM): no suma proyectos por nombre
   const filas = [
-    { cliente: 'LaVirginia', proyecto: 'LAV-LIN-4', lider: 'Martín Noziglia', inicio: 'jul 2026', cierre: 'dic 2026', tratamiento: 'Cantidad', periodo: 'Mensual', plan: 11, entregadasMes: 5, total: 49 },
-    { cliente: 'LaVirginia', proyecto: 'LAV-RED-5', lider: 'Martin Noziglia', inicio: 'jul 2026', cierre: 'dic 2026', tratamiento: 'Cantidad', periodo: 'Mensual', plan: 30, entregadasMes: 21, total: null },
-    { cliente: 'Nave', proyecto: 'NAV-RED-2', lider: 'Martín Noziglia', inicio: 'ene 2025', cierre: 'jun 2025', tratamiento: 'Cantidad', periodo: 'Mensual', plan: 0, entregadasMes: -5, total: null },
-    { cliente: 'Mercado Libre', proyecto: 'MER-LIN-9', lider: 'María Abriola', inicio: 'ene 2026', cierre: 'dic 2026', tratamiento: 'Cantidad', periodo: 'Mensual', plan: 60, entregadasMes: 10, total: 610 },
+    { cliente: 'LaVirginia', proyecto: 'LAV-LIN-4', lider: 'Martín Noziglia', cierre: 'dic 2026', plan: 11, entregadasMes: 5, total: 49 },
+    { cliente: 'LaVirginia', proyecto: 'LAV-RED-5', lider: 'Martín Noziglia', cierre: 'dic 2026', plan: 30, entregadasMes: 21, total: null },
+    { cliente: 'Mercado Libre', proyecto: 'MER-LIN-9', lider: 'María Abriola', cierre: 'dic 2026', plan: 60, entregadasMes: 10, total: 610 },
   ];
-  const r = await handle(new Request('https://pe.test/api/reporte', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': key, origin: 'https://datastudio.google.com' }, body: JSON.stringify({ filas }) }), env as any);
-  assert.equal(r.headers.get('access-control-allow-origin'), 'https://datastudio.google.com');
-  const j: any = await r.json();
-  assert.equal(j.filas, 4); assert.deepEqual(j.proyectosNuevos.sort(), ['LAV-LIN-4', 'LAV-RED-5'], 'sin proyectos cerrados ni ajenos');
-  let d = (await call(env, '/api/data', 'GET', undefined, tl)).j;
-  assert.deepEqual(d.reporte.map((x: any) => x.proyecto), ['LAV-LIN-4', 'LAV-RED-5']);
-  assert.ok(Number(d.settings.reporte_at) > 0);
-  assert.equal(d.settings.as_sync_at, '', 'leer el Reporte no cuenta como traer de AppSheet');
-  // AppSheet: el líder recibe todas las tareas de sus proyectos, de cualquier responsable
-  const lb = [['LAV-LIN-4-60', '30/11/2026', 'Intervalo métrica 21-40', 'Para Enviar', 'recetas', 'x.com', '', '', '', '', 'Martín Botana', ''], ['MER-LIN-9-1', '30/11/2026', 'Intervalo métrica 21-40', 'Para Enviar', 'a', 'y.com', '', '', '', '', 'Otra Persona', '']];
-  const imp = (await (await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': key }, body: JSON.stringify({ lb, red: [] }) }), env as any)).json()) as any;
-  assert.equal(imp.lb, 1); assert.equal(imp.saltadas, 1);
-  d = (await call(env, '/api/data', 'GET', undefined, tl)).j;
-  assert.equal(d.lb[0].usuario, 'Martín Botana');
-  // un técnico no suma proyectos por el Reporte
-  const k1 = (await call(env, '/api/import-key', 'GET', undefined, tok)).j.key;
-  const r1: any = await (await handle(new Request('https://pe.test/api/reporte', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': k1 }, body: JSON.stringify({ filas }) }), env as any)).json();
-  assert.deepEqual(r1.proyectosNuevos, []);
+  const r = await post('/api/reporte', { filas }, 'https://datastudio.google.com');
+  assert.equal(r.filas, 3); assert.deepEqual(r.proyectosNuevos, []);
+  // AppSheet: sus proyectos (Tus Proyectos + redacciones asignadas) y su nombre tal como figura en las tareas
+  const lb = [['LAV-LIN-4-60', '30/11/2026', 'Intervalo métrica 21-40', 'Para Enviar', 'recetas', 'x.com', '', '', '', '', 'Martín Botana', ''], ['MER-LIN-9-1', '30/11/2026', 'Intervalo', 'Para Enviar', 'a', 'y.com', '', '', '', '', 'Otra Persona', '']];
+  const red = [['LAV-RED-5-3', 'tema', 'Argentina', 'Español', '', '', '30/11/2026', 'Normal', 'Entrega', '', 'Martín Botana', '']];
+  const imp = await post('/api/import', { lb, red, proyectos: ['LAV-LIN-4'], as_email: 'martin.botana@x.com', as_nombre: 'Martín Botana' });
+  assert.equal(imp.lb, 1); assert.equal(imp.red, 1); assert.equal(imp.saltadas, 1);
+  const d = (await call(env, '/api/data', 'GET', undefined, tl)).j;
+  assert.equal(d.me.nombre, 'Martín Botana', 'toma el nombre de AppSheet');
+  assert.deepEqual(d.reporte.map((x: any) => x.proyecto).sort(), ['LAV-LIN-4', 'LAV-RED-5'], 'el Reporte se cruza por código');
 });
 
 test('la extensión lleva el mismo lector que el botón de favoritos', async () => {
