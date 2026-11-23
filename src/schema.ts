@@ -54,10 +54,6 @@ export const MIGRATIONS = [
   `CREATE INDEX IF NOT EXISTS lb_uid ON lb_tasks (uid)`,
   `CREATE INDEX IF NOT EXISTS red_uid ON redacciones (uid)`,
   `ALTER TABLE users ADD COLUMN modo TEXT NOT NULL DEFAULT 'tecnico'`,
-  `ALTER TABLE users ADD COLUMN alcance TEXT NOT NULL DEFAULT 'propio'`,
-  `ALTER TABLE users ADD COLUMN edicion TEXT NOT NULL DEFAULT 'completa'`,
-  `CREATE TABLE IF NOT EXISTS reporte (proyecto TEXT PRIMARY KEY, tipo TEXT NOT NULL, cliente TEXT NOT NULL DEFAULT '', lider TEXT NOT NULL DEFAULT '', inicio TEXT NOT NULL DEFAULT '', cierre TEXT NOT NULL DEFAULT '',
-    tratamiento TEXT NOT NULL DEFAULT '', periodo TEXT NOT NULL DEFAULT '', plan_mes REAL, entregadas_mes REAL, total REAL, updated_at INTEGER NOT NULL)`,
 ];
 
 /** Tablas que pasan a tener clave por usuario (se reconstruyen una vez). */

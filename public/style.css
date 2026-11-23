@@ -164,6 +164,3 @@ ul.hl { list-style: none; margin: 0; padding: 4px 16px 12px; } ul.hl li { displa
 .onb-check li.ok>span{background:var(--ok-bg);color:var(--ok)}
 .spin{display:inline-block;width:10px;height:10px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:gira .8s linear infinite;vertical-align:-1px}
 @keyframes gira{to{transform:rotate(360deg)}}
-.tira{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:13px}
-.tira>span:first-child{display:flex;align-items:center;gap:6px}.tira .i{width:15px;height:15px}
-.tira-b{display:flex;align-items:center;gap:8px;flex-wrap:wrap}

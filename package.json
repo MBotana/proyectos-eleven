@@ -6,8 +6,7 @@
   "scripts": {
     "test": "tsx --test test/*.test.ts",
     "dev": "tsx test/devserver.ts",
-    "deploy": "wrangler deploy",
-    "ext": "sh scripts/ext.sh"
+    "deploy": "wrangler deploy"
   },
   "devDependencies": {
     "tsx": "^4.23.15"
