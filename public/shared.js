@@ -332,7 +332,7 @@ export function resumenProyecto(p, { lb, red }, mes, hoy = hoyEn()) {
   const tope = c ? num(c.tope) : null, gastado = c ? num(c.gastado) || 0 : null;
   return {
     code: p.code, cliente: p.cliente, tipo: p.tipo, total: delMes.length, terminadas: cuenta.ok, porVencer: cuenta.warn, vencidas: cuenta.bad, enCurso: cuenta[''],
-    objetivo: num(lin ? p.params?.linksMes : p.params?.piezasMes) || null, atrasadasDeOtrosMeses: abiertasViejas,
+    objetivo: num(p.reporte?.plan_mes) || num(lin ? p.params?.linksMes : p.params?.piezasMes) || null, reporteEntregadas: p.reporte ? num(p.reporte.entregadas_mes) : null, atrasadasDeOtrosMeses: abiertasViejas,
     tope, gastado, pctPresupuesto: tope ? Math.round((gastado / tope) * 100) : null,
   };
 }

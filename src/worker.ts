@@ -7,7 +7,7 @@ import { PROMPTS_INICIALES, PROMPTS_VERSION } from './prompts.ts';
 import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays, tipoHoras, QUIEN, DOC_EDITABLE_LB } from '../public/shared.js';
 
 /** Usuario de la sesión (cada uno ve solo lo suyo). */
-export interface User { id: string; nombre: string; email: string; admin: number; modo?: string }
+export interface User { id: string; nombre: string; email: string; admin: number; modo?: string; alcance?: string }
 export interface Env { DB: any; ASSETS?: any; U?: User }
 const uidOf = (env: Env) => { if (!env.U) throw Object.assign(new Error('Sin usuario'), { status: 401 }); return env.U.id; };
 const yoOf = (env: Env) => env.U?.nombre || YO;
@@ -104,11 +104,11 @@ async function userBySetting(env: Env, key: string, value: string): Promise<User
   return r ? userById(env, String(r.key).split(':')[0]) : null;
 }
 async function userById(env: Env, id: string): Promise<User | null> {
-  const u: any = await env.DB.prepare('SELECT id, nombre, email, admin, modo FROM users WHERE id = ?').bind(id).first();
-  return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico' } : null;
+  const u: any = await env.DB.prepare('SELECT id, nombre, email, admin, modo, alcance FROM users WHERE id = ?').bind(id).first();
+  return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico', alcance: u.alcance || 'propio' } : null;
 }
 export const conUsuario = (env: Env, U: User): Env => ({ ...env, U });
-const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: '' };
+const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: '', reporte_at: '' };
 
 // ---------- acceso (una sola cuenta: contraseña) ----------
 const PBKDF2_IT = 100000;
@@ -239,6 +239,35 @@ export const asMoney = (s: unknown) => { const t = String(s ?? '').replace(/[^\d
  * lb:  [código, mes planificado, tipo, estado, anchor, medio, negociación, moneda, precio, fecha entrega, usuario, mail]
  * red: [código, tema, país, idioma, subproyecto, variante, deadline, prioridad, estado, deadline estado, usuario, fecha entrega]
  */
+const sinTildes = (v: unknown) => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+/** Proyectos vigentes que el Reporte de Seguimiento asigna a este usuario como líder (por nombre). */
+async function proyectosQueLidera(env: Env) {
+  const yo = sinTildes(yoOf(env)), hoyMes = hoyEn(TZ).slice(0, 7);
+  const rows = (await env.DB.prepare('SELECT proyecto, lider, cierre, plan_mes FROM reporte').all()).results as any[];
+  return rows.filter((r) => sinTildes(r.lider) === yo && (Number(r.plan_mes) > 0 || !r.cierre || r.cierre === '-' || mesReporte(r.cierre) >= hoyMes)).map((r) => r.proyecto as string);
+}
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
+/** "sept 2026" → "2026-09" (vacío si no se entiende). */
+export function mesReporte(v: unknown) { const m = sinTildes(v).match(/^([a-z]+)\.? (\d{4})$/); if (!m) return ''; const i = MESES.findIndex((x) => m[1].startsWith(x.slice(0, 3))); return i < 0 ? '' : `${m[2]}-${String(i + 1).padStart(2, '0')}`; }
+/** Guarda el Reporte de Seguimiento (lo lee el botón de favoritos en Looker Studio, solo lectura) y suma al líder sus proyectos. */
+export async function importReporte(env: Env, b: any) {
+  const now = Date.now(); let n = 0;
+  for (const f of (Array.isArray(b.filas) ? b.filas : []).slice(0, 1000)) {
+    const proyecto = str(f.proyecto, 40).toUpperCase(); if (!/^[A-Z0-9]{2,5}-(LIN|RED)-[\w.-]+$/.test(proyecto)) continue;
+    await env.DB.prepare(`INSERT INTO reporte (proyecto, tipo, cliente, lider, inicio, cierre, tratamiento, periodo, plan_mes, entregadas_mes, total, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(proyecto) DO UPDATE SET tipo = excluded.tipo, cliente = excluded.cliente, lider = excluded.lider, inicio = excluded.inicio, cierre = excluded.cierre, tratamiento = excluded.tratamiento,
+        periodo = excluded.periodo, plan_mes = excluded.plan_mes, entregadas_mes = excluded.entregadas_mes, total = COALESCE(excluded.total, reporte.total), updated_at = excluded.updated_at`)
+      .bind(proyecto, proyecto.includes('-LIN-') ? 'LIN' : 'RED', str(f.cliente, 80), str(f.lider, 80), str(f.inicio, 20), str(f.cierre, 20), str(f.tratamiento, 30), str(f.periodo, 30), numOrNull(f.plan), numOrNull(f.entregadasMes), numOrNull(f.total), now).run();
+    n++;
+  }
+  if (n) { await putS(env, 'reporte_at', String(now)); }
+  const out = { filas: n, proyectosNuevos: [] as string[] };
+  if (env.U?.alcance === 'lider') {
+    const r = await importAS(env, { lb: [], red: [], proyectos: await proyectosQueLidera(env), clientes: Object.fromEntries((b.filas || []).map((f: any) => [str(f.proyecto, 40).toUpperCase(), str(f.cliente, 80)])), soloProyectos: true });
+    out.proyectosNuevos = r.proyectosNuevos;
+  }
+  return out;
+}
 export async function importAS(env: Env, b: any) {
   const now = Date.now(), uid = uidOf(env), yo = yoOf(env);
   const codes = new Set(((await env.DB.prepare('SELECT code FROM projects WHERE uid = ?').bind(uid).all()).results as any[]).map(r => r.code));
@@ -248,6 +277,7 @@ export async function importAS(env: Env, b: any) {
   const quiero = new Set<string>([...(Array.isArray(b.proyectos) ? b.proyectos.map((c: unknown) => str(c, 40).toUpperCase()) : []),
     ...(Array.isArray(b.lb) ? b.lb : []).filter((r: any) => str(r[10], 80) === yo).map((r: any) => proyDe(r[0])),
     ...(Array.isArray(b.red) ? b.red : []).filter((r: any) => str(r[10], 80) === yo).map((r: any) => proyDe(r[0]))]);
+  if (env.U?.alcance === 'lider') for (const c of await proyectosQueLidera(env)) quiero.add(c);
   let orden = codes.size;
   for (const c of quiero) {
     if (codes.has(c) || !/^[A-Z0-9]{2,5}-(LIN|RED)-[\d.]+$/.test(c)) continue;
@@ -287,7 +317,7 @@ export async function importAS(env: Env, b: any) {
     if (r.length > 12) await env.DB.prepare(`UPDATE redacciones SET as_aviso = ?, doc_url = CASE WHEN ? != '' THEN ? ELSE doc_url END WHERE id = ?`).bind(str(r[12], 500), str(r[13], 500), str(r[13], 500), id).run();
     out.red++;
   }
-  await putS(env, 'as_sync_at', String(now));
+  if (!b.soloProyectos) await putS(env, 'as_sync_at', String(now));
   return out;
 }
 
@@ -597,7 +627,8 @@ async function allData(env: Env) {
   const auto = await horasAuto(env, desde);
   return {
     projects,
-    me: env.U, usuarios: env.U?.admin ? ((await env.DB.prepare('SELECT id, nombre, email, admin, modo, created_at FROM users ORDER BY created_at').all()).results) : [],
+    me: env.U, usuarios: env.U?.admin ? ((await env.DB.prepare('SELECT id, nombre, email, admin, modo, alcance, created_at FROM users ORDER BY created_at').all()).results) : [],
+    reporte: await q('SELECT r.* FROM reporte r JOIN projects p ON p.code = r.proyecto AND p.uid = ? ORDER BY r.tipo, r.cliente, r.proyecto'),
     lb: await q('SELECT * FROM lb_tasks WHERE uid = ? ORDER BY CASE WHEN deadline = \'\' THEN 1 ELSE 0 END, deadline, created_at'),
     red: await q('SELECT * FROM redacciones WHERE uid = ? ORDER BY CASE WHEN fecha_entrega = \'\' THEN 1 ELSE 0 END, fecha_entrega, created_at'),
     hours: [...auto, ...(await q('SELECT * FROM hours WHERE uid = ? ORDER BY date DESC, created_at DESC')) as any[]].sort((a, b) => b.date.localeCompare(a.date)),
@@ -636,6 +667,16 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const cuerpo = await body(), link = linkAppSheet(cuerpo.as_url);
       if (link) await putS(env, 'as_url', link);
       const r = await importAS(conUsuario(env, U), cuerpo);
+      return new Response(JSON.stringify(r), { headers: { ...cors, 'content-type': 'application/json' } });
+    }
+    // Reporte de Seguimiento (Looker Studio): lo lee el botón de favoritos con la sesión del usuario, solo lectura
+    if (path === '/api/reporte') {
+      const o = req.headers.get('origin') || '', okO = /^https:\/\/(datastudio|lookerstudio)\.google\.com$/.test(o) ? o : 'https://lookerstudio.google.com';
+      const cors = { 'access-control-allow-origin': okO, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-import-key', 'access-control-max-age': '600', vary: 'origin' };
+      if (m === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+      const U = m === 'POST' ? await userBySetting(env, 'import_key', req.headers.get('x-import-key') ?? '') : null;
+      if (!U) return new Response(JSON.stringify({ error: 'No autorizado: volvé a copiar el botón desde Ajustes de la app' }), { status: 401, headers: { ...cors, 'content-type': 'application/json' } });
+      const r = await importReporte(conUsuario(env, U), await body());
       return new Response(JSON.stringify(r), { headers: { ...cors, 'content-type': 'application/json' } });
     }
     // compilado de medios desde la planilla de Google (la abro yo en el navegador con tu sesión de Eleven)
@@ -724,7 +765,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (path === '/api/usuarios/modo' && m === 'POST') {
       if (!U.admin) return fail('Solo quien administra la app puede cambiarlo', 403);
       const b = await body();
-      await env.DB.prepare('UPDATE users SET modo = ? WHERE id = ?').bind(oneOf(b.modo, ['lider', 'tecnico'], 'tecnico'), str(b.id, 40)).run();
+      if (b.modo !== undefined) await env.DB.prepare('UPDATE users SET modo = ? WHERE id = ?').bind(oneOf(b.modo, ['lider', 'tecnico'], 'tecnico'), str(b.id, 40)).run();
+      if (b.alcance !== undefined) await env.DB.prepare('UPDATE users SET alcance = ? WHERE id = ?').bind(oneOf(b.alcance, ['lider', 'propio'], 'propio'), str(b.id, 40)).run();
       return json({ ok: true });
     }
     if (path === '/api/import-key' && m === 'GET') {
