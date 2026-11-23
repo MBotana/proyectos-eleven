@@ -1167,7 +1167,7 @@ window.addEventListener('message', async (e) => {
   const antes = S.ext; S.ext = e.data;
   if (ED_LIDER && S.token && S.data?.me && !S.extConfigurada) {
     S.extConfigurada = true;
-    try { const { key } = await api('/api/import-key'); window.postMessage({ pe: 'ext-config', clave: key, as_url: S.data.settings.as_url || '', reporte: URL_REPORTE, cadaHoras: 3 }, location.origin); } catch { S.extConfigurada = false; }
+    try { const { key } = await api('/api/import-key'); window.postMessage({ pe: 'ext-config', clave: key, as_url: S.data.settings.as_url || '', reporte: URL_REPORTE + (S.data.me?.email ? '?authuser=' + encodeURIComponent(S.data.me.email) : ''), cadaHoras: 3 }, location.origin); } catch { S.extConfigurada = false; }
   }
   const c = $('#extcard'); if (c && JSON.stringify(antes) !== JSON.stringify(S.ext)) c.outerHTML = tarjetaExtension();
   if (ED_LIDER && S.bv?.paso === 'ext') render();

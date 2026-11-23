@@ -22,11 +22,14 @@ chrome.runtime.onMessage.addListener((m, s, responder) => {
 /** Cuando el usuario abre AppSheet o el Reporte: si hace rato que no se lee (o la app lo pidió), lo lee en esa misma pestaña. */
 async function alAbrir(tabId, que) {
   const { config, ultimas = {}, pedido = 0 } = await chrome.storage.local.get(['config', 'ultimas', 'pedido']);
-  if (!config?.clave || corriendo) return;
+  if (!config?.clave || ocupado()) return;
   const reciente = Date.now() - (ultimas[que] || 0) < MEDIA_HORA, pedidoVivo = Date.now() - pedido < MEDIA_HORA;
   if (reciente && !pedidoVivo) return;
-  corriendo = true;
+  corriendo = true; desde = Date.now();
   chrome.action.setBadgeText({ text: '…' }); chrome.action.setBadgeBackgroundColor({ color: '#1d4ed8' });
+  try { await alAbrir2(tabId, config, que); } catch (e) { await terminar([{ que, ok: false, texto: e.message }]); }
+}
+async function alAbrir2(tabId, config, que) {
   const partes = [await correrEn(tabId, config, que, que === 'AppSheet' ? 8 * 60000 : 4 * 60000)];
   if (que === 'AppSheet' && partes[0].ok) await chrome.storage.local.set({ pedido: 0 });
   // después de AppSheet, el Reporte en segundo plano (si hace rato que no se lee)
@@ -38,14 +41,16 @@ async function terminar(partes) {
   const { ultimas = {} } = await chrome.storage.local.get('ultimas');
   for (const p of partes) if (p.ok) ultimas[p.que] = Date.now();
   await chrome.storage.local.set({ ultimo: { at: Date.now(), partes }, ultimas });
+  await chrome.storage.local.remove('leyendo');
   const mal = partes.some((p) => !p.ok);
   chrome.action.setBadgeText({ text: mal ? '!' : '' }); chrome.action.setBadgeBackgroundColor({ color: '#b42318' });
   corriendo = false;
 }
 
-let corriendo = false;
+let corriendo = false, desde = 0;
+const ocupado = () => corriendo && Date.now() - desde < 12 * 60000; // si una lectura quedó colgada, a los 12 min se descarta
 async function actualizar() {
-  if (corriendo) return; corriendo = true;
+  if (ocupado()) return; corriendo = true; desde = Date.now();
   const { config } = await chrome.storage.local.get('config');
   const resultado = { at: Date.now(), partes: [] };
   try {
@@ -70,11 +75,17 @@ async function leerEn(url, config, que, limite) {
 }
 /** Corre el lector (el mismo del botón de favoritos) en una pestaña ya abierta y espera su resultado. */
 async function correrEn(tabId, config, que, limite) {
+  await chrome.storage.local.set({ leyendo: { que, at: Date.now() } });
   try {
     if (que === 'AppSheet') { // AppSheet completa el link con el nombre de la app al cargar; si pide iniciar sesión, no hay tabla
       let ok = false;
       for (let i = 0; i < 90 && !ok; i++) { const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: () => /appName=/.test(location.hash) && (!!document.querySelector('.TableView, .TableViewRow') || /Eleven - Operaciones/.test(document.body.innerText)) }); ok = !!r?.result; if (!ok) await espera(1000); }
       if (!ok) return { que, ok: false, texto: 'hay que iniciar sesión en AppSheet' };
+    }
+    if (que === 'Reporte') { // si Google pide elegir cuenta o no hay acceso, se espera a que la elijas en esa pestaña
+      let ok = false;
+      for (let i = 0; i < 150 && !ok; i++) { const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!document.querySelector('[role=treeitem]') && /[A-Z0-9]{2,5}-(LIN|RED)-/.test(document.body.innerText) }); ok = !!r?.result; if (!ok) await espera(1000); }
+      if (!ok) return { que, ok: false, texto: 'el Reporte no se abrió: elegí una cuenta con acceso' };
     }
     await espera(3000);
     await chrome.scripting.executeScript({ target: { tabId }, files: ['traer.js'] });
@@ -89,6 +100,6 @@ async function correrEn(tabId, config, que, limite) {
     }
     return { que, ok: false, texto: 'tardó demasiado' };
   } catch (e) {
-    return { que, ok: false, texto: /signin|ServiceLogin|accounts\.google|Cannot access/.test(String(e)) ? 'hay que iniciar sesión' : e.message };
+    return { que, ok: false, texto: /signin|ServiceLogin|accounts\.google|Cannot access/.test(String(e)) ? (que === 'Reporte' ? 'el Reporte pide elegir cuenta: elegí una con acceso' : 'hay que iniciar sesión') : e.message };
   }
 }
