@@ -14,6 +14,7 @@
       avisar();
     }
     if (e.data.pe === 'ext-actualizar') chrome.runtime.sendMessage({ pe: 'actualizar' });
+    if (e.data.pe === 'ext-leer-ya') chrome.runtime.sendMessage({ pe: 'leer-ya' });
     if (e.data.pe === 'ext-estado') avisar();
   });
   avisar();

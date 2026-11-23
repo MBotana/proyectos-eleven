@@ -382,3 +382,32 @@ test('la extensión lleva el mismo lector que el botón de favoritos', async () 
   assert.equal(mf.manifest_version, 3);
   assert.ok(!mf.permissions.includes('cookies') && !mf.host_permissions.some((h: string) => h.includes('docs.google.com')), 'solo lo necesario');
 });
+
+test('edición líder: cuenta aparte con el mismo mail, solo lectura y todos los datos de sus proyectos', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { nombre: 'Martín Botana', email: 'martin@eleven.com', password: 'clave-segura-1' })).j.token;
+  const alta = await call(env, '/api/signup', 'POST', { edicion: 'lider', nombre: 'Martín Botana', email: 'Martin@Eleven.com', password: 'clave-lider-1' });
+  assert.equal(alta.status, 200, 'mismo mail y nombre que la cuenta completa, en otra edición');
+  assert.equal((await call(env, '/api/signup', 'POST', { edicion: 'lider', nombre: 'Otro', email: 'martin@eleven.com', password: 'clave-lider-2' })).status, 409);
+  // cada login entra a su edición
+  const l1 = await call(env, '/api/login', 'POST', { usuario: 'martin@eleven.com', password: 'clave-segura-1' });
+  assert.equal(l1.status, 200);
+  assert.equal((await call(env, '/api/login', 'POST', { usuario: 'martin@eleven.com', password: 'clave-lider-1' })).status, 401, 'la clave de líder no abre la cuenta completa');
+  const tl = (await call(env, '/api/login', 'POST', { edicion: 'lider', usuario: 'martin@eleven.com', password: 'clave-lider-1' })).j.token;
+  let d = (await call(env, '/api/data', 'GET', undefined, tl)).j;
+  assert.equal(d.me.edicion, 'lider'); assert.equal(d.me.alcance, 'lider'); assert.equal(d.projects.length, 0, 'arranca vacía: no ve los datos de la cuenta completa');
+  // solo lectura
+  assert.equal((await call(env, '/api/lb', 'POST', { project: 'GAL-LIN-1', anchor: 'x' }, tl)).status, 403);
+  assert.equal((await call(env, '/api/ia/key', 'POST', { key: 'x' }, tl)).status, 403);
+  assert.equal((await call(env, '/api/settings', 'POST', { avisos: '0' }, tl)).status, 403);
+  // AppSheet: los proyectos habilitados en "Tus proyectos" y todas sus tareas, de cualquier responsable
+  const key = (await call(env, '/api/import-key', 'GET', undefined, tl)).j.key;
+  const lb = [['GAL-LIN-1-40', '30/11/2026', 'Intervalo métrica 21-40', 'Para Enviar', 'seguro', 'x.com', '', '', '', '', 'Otra Persona', ''], ['LAV-LIN-4-61', '25/11/2026', 'Intervalo métrica 21-40', 'Para Enviar', 'postres', 'y.com', '', '', '', '', 'Martín Botana', '']];
+  const imp: any = await (await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': key }, body: JSON.stringify({ lb, red: [], proyectos: ['GAL-LIN-1', 'LAV-LIN-4'] }) }), env as any)).json();
+  assert.equal(imp.lb, 2);
+  d = (await call(env, '/api/data', 'GET', undefined, tl)).j;
+  assert.deepEqual(d.lb.map((t: any) => t.usuario).sort(), ['Martín Botana', 'Otra Persona']);
+  const u1p = (await call(env, '/api/data', 'GET', undefined, tok)).j.projects.find((p: any) => p.code === 'GAL-LIN-1').params;
+  assert.deepEqual(d.projects.find((p: any) => p.code === 'GAL-LIN-1').params, u1p, 'toma los parámetros de los proyectos');
+  // la cuenta completa no cambió
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.lb.length, 0);
+});

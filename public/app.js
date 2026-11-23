@@ -1,10 +1,13 @@
 // Proyectos Eleven — app de escritorio (PWA instalable desde Chrome o Edge). Un solo usuario; todo se guarda en el servidor.
 import { ESTADOS_LB, ESTADOS_NEG, ESTADOS_RED, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, TIPOS_SERVICIO, YO as YO_DEF, esCerradoLB, esCerradoRED, PASOS_LB, PASOS_RED, puedeRedactarLB, avisosLB, hoyEn, addDays, normDomain, compiladoAMedios, aptoMedio, planificar, alertas, QUIEN, DOC_EDITABLE_LB, semaforo, resumenProyecto } from './shared.js';
 
+/** Edición para líderes (/lider): solo lectura, sin Ajustes, sin IA ni Claude, con su propia sesión en este navegador. */
+const ED_LIDER = location.pathname.startsWith('/lider');
+const TOKEN_KEY = ED_LIDER ? 'pe_token_lider' : 'pe_token', CACHE_KEY = ED_LIDER ? 'pe_cache_lider' : 'pe_cache', BASE = ED_LIDER ? '/lider' : '/';
 /** Tu nombre en AppSheet (cada usuario ve sus tareas); se toma de la sesión al cargar. */
 let YO = YO_DEF;
 const S = {
-  token: localStorage.getItem('pe_token') || '', setup: false, data: null, view: localStorage.getItem('pe_view') || 'inicio', calurl: '',
+  token: localStorage.getItem(TOKEN_KEY) || '', setup: false, data: null, view: localStorage.getItem('pe_view') || 'inicio', calurl: '',
   f: { lbProj: '', lbEstado: 'activas', lbQ: '', lbUser: YO, lbMail: '', lbNeg: '', lbMes: '', lbGroup: '1', redProj: '', redEstado: 'activas', redQ: '', redUser: YO, redGroup: '1', medGroup: 'mail_eleven', medQ: '', mes: hoyEn().slice(0, 7), medTab: 'compilado', mProj: '', mPais: '', mPrecio: '', mDr: '', mMail: '', mQ: '', planMes: addDays(hoyEn().slice(0, 7) + '-28', 7).slice(0, 7), iaProj: '' },
   sel: { lb: new Set(), red: new Set() }, medios: null, plan: null, pings: 0,
   sort: { lb: ['deadline', 1], red: ['fecha_entrega', 1], med: ['precio_usd', 1] },
@@ -44,7 +47,7 @@ const ic = (k) => `<svg class="i" viewBox="0 0 24 24">${IC[k]}</svg>`;
 async function api(path, method = 'GET', body) {
   const r = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(S.token ? { authorization: 'Bearer ' + S.token } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 && S.token && path !== '/api/login') { S.token = ''; localStorage.removeItem('pe_token'); render(); }
+  if (r.status === 401 && S.token && path !== '/api/login') { S.token = ''; localStorage.removeItem(TOKEN_KEY); render(); }
   if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
   return j;
 }
@@ -54,11 +57,12 @@ const tarea = (k, id) => S.data[k].find((o) => o.id === id) || S.data[k + 'P']?.
 function tomarUsuario() {
   if (!S.data?.me) return; const antes = YO; YO = S.data.me.nombre || YO_DEF;
   S.data.reporte = S.data.reporte || []; for (const p of S.data.projects) p.reporte = S.data.reporte.find((r) => r.proyecto === p.code) || null;
+  if (ED_LIDER && !S.extConfigurada) window.postMessage({ pe: 'ext-estado' }, location.origin);
   if (!S.yoListo || antes !== YO) { S.f.lbUser = YO; S.f.redUser = YO; S.yoListo = true; }
 }
 async function load() {
-  try { S.data = separarPruebas(await api('/api/data')); tomarUsuario(); localStorage.setItem('pe_cache', JSON.stringify({ ...S.data, lb: [...S.data.lb, ...S.data.lbP], red: [...S.data.red, ...S.data.redP], lbP: undefined, redP: undefined })); }
-  catch { if (!S.data) { try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); } catch { /* nada */ } } if (S.token) toast('Sin conexión: se muestran los últimos datos'); }
+  try { S.data = separarPruebas(await api('/api/data')); tomarUsuario(); localStorage.setItem(CACHE_KEY, JSON.stringify({ ...S.data, lb: [...S.data.lb, ...S.data.lbP], red: [...S.data.red, ...S.data.redP], lbP: undefined, redP: undefined })); }
+  catch { if (!S.data) { try { S.data = separarPruebas(JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')); } catch { /* nada */ } } if (S.token) toast('Sin conexión: se muestran los últimos datos'); }
   render();
 }
 const proj = (code) => S.data.projects.find((p) => p.code === code);
@@ -82,16 +86,20 @@ function render() {
   if (!S.token) return renderLogin();
   if (!S.data) { $('#app').innerHTML = '<div class="login"><div class="mute">Cargando…</div></div>'; return; }
   if (necesitaBienvenida()) return renderBienvenida();
-  if (!$('#shell')) $('#app').innerHTML = `<div id="shell"><aside id="side"><div class="brand"><img src="/icon.svg" alt=""><div><b>Proyectos Eleven</b><small>Link building · Contenido</small></div></div><nav id="nav"></nav><div id="sidetimer"></div></aside><section id="main"><header id="head"></header><div id="view"></div></section></div>`;
+  if (!$('#shell')) $('#app').innerHTML = `<div id="shell"><aside id="side"><div class="brand"><img src="/icon.svg" alt=""><div><b>Proyectos Eleven</b><small>${ED_LIDER ? 'Líderes · solo lectura' : 'Link building · Contenido'}</small></div></div><nav id="nav"></nav><div id="sidetimer"></div></aside><section id="main"><header id="head"></header><div id="view"></div></section></div>`;
   const al = misAlertas(), counts = { lb: S.data.lb.filter((t) => t.usuario === YO && !esCerradoLB(t.estado)).length, red: S.data.red.filter((r) => r.usuario === YO && !esCerradoRED(r.estado)).length, appsheet: S.data.as_pend.length, alertas: al.lider.length + al.impagas.length + al.indexacion.length };
-  const modo = modoActual(), vistas = modo === 'lider' ? VIEWS_LIDER : VIEWS;
+  const modo = modoActual(), vistas = ED_LIDER ? VIEWS_LIDER.filter(([k]) => k !== 'ajustes' && k !== 'sep') : modo === 'lider' ? VIEWS_LIDER : VIEWS;
   if (!vistas.some(([k]) => k === S.view)) S.view = vistas[0][0];
   $('#nav').innerHTML = vistas.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count${k === 'alertas' ? ' hotc' : ''}">${counts[k]}</span>` : ''}</button>`)).join('');
   S.enPruebas = S.view === 'pruebas';
   const v = VIEWS_FN[S.view] || VIEWS_FN.inicio, out = v();
   $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}<button class="btn sec" data-act="actualizar" title="Trae los últimos cambios (los míos y los tuyos) y la última versión de la app">${ic('refresh')}Actualizar</button></div>`;
   const keep = $('#view').scrollTop; $('#view').innerHTML = out.body; $('#view').scrollTop = keep;
-  if (modo === 'lider') renderModo(); else renderTimer();
+  if (ED_LIDER) renderCuenta(); else if (modo === 'lider') renderModo(); else renderTimer();
+}
+function renderCuenta() {
+  const el = $('#sidetimer'); if (!el) return;
+  el.innerHTML = `<div class="lbl">Sesión</div><div style="font-weight:600">${h(S.data.me?.nombre || '')}</div><div class="small mute" style="margin-bottom:8px">${h(S.data.me?.email || '')}</div><button class="btn sm sec full" data-act="logout">Cerrar sesión</button>`;
 }
 /** Selector de modo en la barra lateral (cada uno puede alternar; el predeterminado lo elige quien administra). */
 function renderModo() {
@@ -99,6 +107,7 @@ function renderModo() {
   el.innerHTML = `<div class="lbl">Modo</div><div class="seg2"><button class="${m === 'tecnico' ? 'on' : ''}" data-act="modo" data-v="tecnico">Técnico</button><button class="${m === 'lider' ? 'on' : ''}" data-act="modo" data-v="lider">Líder</button></div>`;
 }
 function renderLogin() {
+  if (ED_LIDER) return renderLoginLider();
   const alta = S.setup || S.invitacion;
   const intro = S.invitacion === false ? 'Esta invitación ya se usó o no existe. Pedile un link nuevo a quien te invitó.' : S.invitacion ? 'Te invitaron a Proyectos Eleven. Creá tu cuenta: tu nombre tiene que ser igual al de AppSheet, así la app encuentra tus tareas.' : S.setup ? 'Primera vez: creá tu cuenta.' : 'Ingresá con tu mail (o tu nombre) y tu contraseña.';
   $('#app').innerHTML = `<div class="login">${S.invitacion ? pasosBienvenida(enApp() || localStorage.getItem('pe_instalada') ? 1 : 0) : ''}${S.invitacion && !enApp() ? cajaInstalar() : ''}<form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${intro}</p>
@@ -106,6 +115,20 @@ function renderLogin() {
       : `<label>Mail o nombre<input name="usuario" autocomplete="username" autofocus></label>`}
     ${S.invitacion === false ? '' : `<label>Contraseña<input type="password" name="pw" autocomplete="${alta ? 'new-password' : 'current-password'}" required minlength="8"></label>
     <button class="btn full" style="margin-top:14px">${alta ? 'Crear cuenta y entrar' : 'Entrar'}</button>`}<div class="err" id="lerr"></div></form></div>`;
+}
+function renderLoginLider() {
+  const alta = S.altaLider !== false;
+  $('#app').innerHTML = `<div class="login">${pasosLider(0)}<form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven · Líderes</h1>
+    <p>${alta ? 'Creá tu cuenta. Tu nombre tiene que ser igual al de AppSheet.' : 'Ingresá con tu mail y tu contraseña.'}</p>
+    ${alta ? `<label>Nombre (igual que en AppSheet)<input name="nombre" required minlength="3" placeholder="Nombre Apellido" autofocus></label><label>Mail de Eleven<input name="email" type="email" required autocomplete="email"></label>`
+      : `<label>Mail<input name="usuario" type="email" autocomplete="username" autofocus></label>`}
+    <label>Contraseña<input type="password" name="pw" autocomplete="${alta ? 'new-password' : 'current-password'}" required minlength="8"></label>
+    <button class="btn full" style="margin-top:14px">${alta ? 'Crear cuenta' : 'Entrar'}</button><div class="err" id="lerr"></div>
+    <p class="small" style="margin:14px 0 0;text-align:center">${alta ? '¿Ya tenés cuenta? <button class="lnk small" type="button" data-act="altalider" data-v="0">Ingresá</button>' : '¿Primera vez? <button class="lnk small" type="button" data-act="altalider" data-v="1">Creá tu cuenta</button>'}</p></form></div>`;
+}
+function pasosLider(hechos) {
+  const n = ['Creá tu cuenta', 'Instalá la extensión', 'Ingresá a AppSheet', 'Tus proyectos'];
+  return `<ol class="onb-pasos">${n.map((t, i) => `<li class="${i < hechos ? 'ok' : i === hechos ? 'on' : ''}"><span>${i < hechos ? '✓' : i + 1}</span>${t}</li>`).join('')}</ol>`;
 }
 const searchBox = (f, ph) => `<div class="search">${ic('search')}<input type="search" data-f="${f}" placeholder="${ph}" value="${h(S.f[f])}"></div>`;
 function th(view, key, label, cls = '') { const [k, d] = S.sort[view]; return `<th data-sort="${key}" data-sv="${view}" class="${cls}">${label}${k === key ? `<span class="arr">${d > 0 ? '▲' : '▼'}</span>` : ''}</th>`; }
@@ -433,7 +456,7 @@ async function actualizarTodo() {
 
 // ======================= Modo líder (solo lectura, por proyecto) =======================
 const VIEWS_LIDER = [['tablero', 'Tablero'], ['lproyectos', 'Proyectos'], ['lreporte', 'Reporte'], ['lalertas', 'Para revisar'], ['sep'], ['ajustes', 'Ajustes']];
-const modoActual = () => (S.data?.me ? localStorage.getItem('pe_modo_' + S.data.me.id) || S.data.me.modo || 'tecnico' : 'tecnico');
+const modoActual = () => ED_LIDER ? 'lider' : (S.data?.me ? localStorage.getItem('pe_modo_' + S.data.me.id) || S.data.me.modo || 'tecnico' : 'tecnico');
 const SEM_TXT = { ok: 'Terminada', warn: 'Por vencer', bad: 'Vencida o con problema', '': 'En curso', off: 'Anulada' };
 const semDot = (c, t) => `<span class="sem sem-${c || 'run'}" title="${h(t || SEM_TXT[c])}"></span>`;
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -454,6 +477,8 @@ const URL_REPORTE = 'https://datastudio.google.com/u/0/reporting/21888fb7-9f40-4
 const esLiderDatos = () => S.data?.me?.alcance === 'lider';
 function tiraActualizar() {
   const st = S.data.settings;
+  if (ED_LIDER) return `<div class="tira"><span>${ic('refresh')}<b>Datos</b> · AppSheet ${haceCuanto(st.as_sync_at)} · Reporte ${haceCuanto(st.reporte_at)}</span>
+    <span class="tira-b">${S.ext ? `<span class="small mute">La extensión actualiza cada 3 h</span><button class="btn sm" data-act="extahora">Actualizar ahora</button>` : `<span class="small t-bad">Falta la extensión</span><button class="btn sm" data-act="bvext">Instalarla</button>`}</span></div>`;
   return `<div class="tira"><span>${ic('refresh')}<b>Datos</b> · AppSheet ${haceCuanto(st.as_sync_at)} · Reporte ${haceCuanto(st.reporte_at)}</span>
     <span class="tira-b">${st.as_url ? `<a class="btn sm sec" href="${h(st.as_url)}" target="_blank" rel="noopener">Abrir AppSheet</a>` : ''}<a class="btn sm sec" href="${URL_REPORTE}" target="_blank" rel="noopener">Abrir Reporte</a>
     <span class="small mute">y tocá <b>Proyectos Eleven</b> en tus favoritos · <a href="#" data-act="view" data-v="ajustes">¿no lo tenés?</a></span><button class="btn sm" data-act="refrescar">Actualizar</button></span></div>`;
@@ -896,11 +921,16 @@ document.addEventListener('click', async (ev) => {
     case 'resetcal': if (confirm('El link anterior deja de funcionar y vas a tener que volver a agregarlo en Google Calendar. ¿Seguir?')) { S.calurl = (await api('/api/calendar/reset', 'POST')).url; render(); } break;
     case 'claudeinst': instalarSkill(); break;
     case 'refrescar': await load(); toast('Datos actualizados'); break;
-    case 'extahora': window.postMessage({ pe: 'ext-actualizar' }, location.origin); toast('La extensión está actualizando: se abre y se cierra una pestaña de fondo'); break;
+    case 'altalider': S.altaLider = el.dataset.v === '1'; render(); break;
+    case 'bvext': S.bv = { paso: 'ext', desde: Date.now() - 5000 }; render(); break;
+    case 'bvfav': S.bv = { ...S.bv, paso: 'fav' }; render(); break;
+    case 'bvlistoED': S.bv = { ...S.bv, paso: 'listo' }; render(); break;
+    case 'bvirAS': window.postMessage({ pe: 'ext-leer-ya' }, location.origin); window.open(S.data.settings.as_url || 'https://www.appsheet.com/', '_blank'); break;
+    case 'extahora': window.postMessage({ pe: 'ext-actualizar' }, location.origin); toast('Actualizando: se abren y cierran pestañas de fondo (1 a 3 minutos). La app se refresca sola.'); clearInterval(S.extPoll); { let n = 0; S.extPoll = setInterval(() => { load(); if (++n > 24) clearInterval(S.extPoll); }, 10000); } break;
     case 'bvlisto': S.bv = { ...S.bv, paso: 'listo' }; clearInterval(S.bvPoll); render(); break;
     case 'instalarapp': if (instalarEvt) { instalarEvt.prompt(); const r = await instalarEvt.userChoice; if (r.outcome === 'accepted') localStorage.setItem('pe_instalada', '1'); } break;
     case 'bvclaude': localStorage.setItem('pe_claude_via', el.dataset.via); S.bv = { paso: 'espera', via: el.dataset.via, desde: Date.now() - 5000 }; await abrirClaude('bienvenida', el.dataset.via); render(); break;
-    case 'bvsaltar': case 'bvfin': clearInterval(S.bvPoll); localStorage.setItem(claveBienv(), '1'); S.bv = null; if (el.dataset.act === 'bvsaltar') { S.view = 'ajustes'; setTimeout(prepararBoton, 0); } $('#app').innerHTML = ''; render(); break;
+    case 'bvsaltar': case 'bvfin': clearInterval(S.bvPoll); localStorage.setItem(claveBienv(), '1'); S.bv = null; if (el.dataset.act === 'bvsaltar' && !ED_LIDER) { S.view = 'ajustes'; setTimeout(prepararBoton, 0); } $('#app').innerHTML = ''; render(); break;
     case 'guardarasurl': { const v = $('#asurl').value.trim(); await api('/api/settings', 'POST', { as_url: v }); await load(); toast(S.data.settings.as_url ? 'Link de AppSheet guardado' : 'El link tiene que empezar con https://www.appsheet.com/start/'); break; }
     case 'claudezip': descargarSkill(); break;
     case 'claudeok': localStorage.setItem('pe_skill', '1'); toast('Listo: la skill queda marcada como instalada'); render(); break;
@@ -912,7 +942,7 @@ document.addEventListener('click', async (ev) => {
     case 'push': enablePush(); break;
     case 'pushtest': { const r = await api('/api/push/test', 'POST'); $('#pushmsg').textContent = r.delivered ? 'Aviso de prueba enviado.' : 'Todavía no activaste los avisos en ninguna computadora.'; break; }
     case 'export': { const d = await api('/api/export'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })); a.download = `proyectos-eleven-${hoy()}.json`; a.click(); break; }
-    case 'logout': await api('/api/logout', 'POST').catch(() => {}); S.token = ''; localStorage.removeItem('pe_token'); render(); break;
+    case 'logout': await api('/api/logout', 'POST').catch(() => {}); S.token = ''; localStorage.removeItem(TOKEN_KEY); render(); break;
   }
 });
 document.addEventListener('change', async (ev) => {
@@ -943,10 +973,11 @@ document.addEventListener('submit', async (ev) => {
   ev.preventDefault(); const f = ev.target;
   if (f.id === 'loginf') {
     try {
-      const r = S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
+      const r = ED_LIDER ? await api(S.altaLider !== false ? '/api/signup' : '/api/login', 'POST', S.altaLider !== false ? { edicion: 'lider', nombre: f.nombre.value, email: f.email.value, password: f.pw.value } : { edicion: 'lider', usuario: f.usuario.value, password: f.pw.value })
+        : S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
         : S.setup ? await api('/api/setup', 'POST', { nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
         : await api('/api/login', 'POST', { usuario: f.usuario.value, password: f.pw.value });
-      S.token = r.token; localStorage.setItem('pe_token', r.token); localStorage.removeItem('pe_inv'); S.setup = false; S.invitacion = undefined; history.replaceState(null, '', '/'); $('#app').innerHTML = ''; await load();
+      S.token = r.token; localStorage.setItem(TOKEN_KEY, r.token); localStorage.removeItem('pe_inv'); S.setup = false; S.invitacion = undefined; history.replaceState(null, '', BASE); $('#app').innerHTML = ''; await load();
     }
     catch (e) { $('#lerr').textContent = e.message; }
     return;
@@ -1050,8 +1081,35 @@ function pasosBienvenida(hechos) {
 const claveBienv = () => 'pe_bienv_' + (S.data?.me?.id || '');
 function necesitaBienvenida() {
   if (!S.data?.me || sessionStorage.getItem('pe_claude') || localStorage.getItem(claveBienv())) return false;
+  if (ED_LIDER) return (!S.data.settings.as_sync_at && !S.data.reporte.length) || !!S.bv;
   if (esLiderDatos()) return (!S.data.reporte.length && !S.data.settings.as_sync_at) || !!S.bv;
   return !S.data.settings.as_sync_at || !!S.bv;
+}
+/** Bienvenida de la edición líder: extensión → AppSheet → listo. La extensión lee todo sola con la sesión del líder. */
+function renderBienvenidaED() {
+  const st = S.data.settings, nombre = h((S.data.me.nombre || '').split(' ')[0]);
+  if (!S.bv) S.bv = { paso: S.ext ? 'as' : 'ext', desde: Date.now() - 5000 };
+  if (S.bv.paso === 'ext' && S.ext) S.bv.paso = 'as';
+  const as = Number(st.as_sync_at) > S.bv.desde, rep = Number(st.reporte_at) > S.bv.desde && S.data.reporte.length;
+  if (S.bv.paso === 'as' && as && rep) S.bv.paso = 'listo';
+  const it = (ok, t, d) => `<li class="${ok ? 'ok' : ''}"><span>${ok ? '✓' : '·'}</span><div><b>${t}</b>${d ? `<div class="small mute" style="margin-top:2px">${d}</div>` : ''}</div></li>`;
+  let cuerpo, paso = 1;
+  if (S.bv.paso === 'ext') cuerpo = `<h1>Hola, ${nombre}</h1><p>Instalá la extensión <b>Proyectos Eleven</b> en Chrome. Es la que lee AppSheet y el Reporte de Seguimiento con tu sesión y mantiene tus proyectos al día. Solo lectura: no cambia nada.</p>
+      <a class="btn" href="/extension/proyectos-eleven-extension.zip" download>Descargar la extensión</a>
+      <ol class="steps small" style="margin:14px 0 6px"><li>Descomprimí el archivo descargado.</li><li>En Chrome, abrí el menú ⋮ → <b>Extensiones</b> → <b>Administrar extensiones</b> y activá <b>Modo de desarrollador</b> (arriba a la derecha).</li><li>Tocá <b>Cargar descomprimida</b> y elegí la carpeta. Esta ventana sigue sola.</li></ol>
+      <p class="small mute">Cuando esté publicada en la Chrome Web Store, este paso es un solo botón: «Agregar a Chrome».</p>
+      <p class="small mute"><span class="spin"></span> Esperando la extensión… · <button class="lnk small" data-act="bvfav">No puedo instalar extensiones</button></p>`;
+  else if (S.bv.paso === 'fav') { cuerpo = bienvenidaLider(); paso = 2; }
+  else if (S.bv.paso === 'as') { paso = 2; cuerpo = `<h1>Ingresá a AppSheet</h1><p>Se abre AppSheet en otra pestaña: iniciá sesión con tu cuenta de Eleven y entrá a <b>Eleven - Operaciones</b>. La extensión lee tus proyectos sola (vas a ver un cartel azul arriba a la derecha; no cierres la pestaña hasta que diga «listo») y después el Reporte de Seguimiento, en segundo plano.</p>
+      <button class="btn" data-act="bvirAS">Ingresar a AppSheet</button>
+      <ul class="onb-check">${it(as, 'Tus tareas de AppSheet', as ? 'Listo.' : '<span class="spin"></span> Esperando…')}${it(rep, 'Reporte de Seguimiento', rep ? 'Listo.' : as ? '<span class="spin"></span> Leyendo en segundo plano…' : 'Se lee después de AppSheet.')}</ul>
+      ${as && !rep ? '<button class="btn sm sec" data-act="bvlistoED">Seguir sin esperar el Reporte</button>' : ''}`; }
+  else { paso = 4; const n = S.data.projects.filter((p) => p.active).length;
+    cuerpo = `<h1>¡Listo, ${nombre}!</h1><p>Cargamos <b>${n} proyecto${n === 1 ? '' : 's'}</b> con todas sus tareas${S.data.reporte.length ? ' y el plan y lo entregado del Reporte de Seguimiento' : ''}.</p>
+      <p class="small mute">La extensión los vuelve a leer sola cada 3 horas (con Chrome abierto). Para tener lo último en el momento, tocá <b>Actualizar ahora</b> arriba del tablero.</p><button class="btn" data-act="bvfin">Ver mis proyectos</button>`; }
+  $('#app').innerHTML = `<div class="login onb">${pasosLider(paso)}<div class="box">${cuerpo}</div></div>`;
+  if (S.bv.paso === 'fav' && !S.bmkHref) prepararBoton().then(() => { const a = $('#bmk'); if (a) a.href = S.bmkHref; });
+  clearInterval(S.bvPoll); if (S.bv.paso !== 'listo') S.bvPoll = setInterval(() => { if (document.visibilityState !== 'visible') return; if (S.bv?.paso === 'ext') window.postMessage({ pe: 'ext-estado' }, location.origin); else load(); }, 4000);
 }
 function bienvenidaLider() {
   const st = S.data.settings; S.bv = S.bv?.paso === 'datos' || S.bv?.paso === 'listo' ? S.bv : { paso: 'datos', desde: Date.now() - 5000 };
@@ -1069,6 +1127,7 @@ function bienvenidaLider() {
     <button class="btn" data-act="bvlisto" ${rep || as ? '' : 'disabled'}>Seguir</button> <button class="lnk small" data-act="bvsaltar">Lo hago después</button>`;
 }
 function renderBienvenida() {
+  if (ED_LIDER) return renderBienvenidaED();
   if (esLiderDatos()) {
     $('#app').innerHTML = `<div class="login onb">${pasosBienvenida(S.bv?.paso === 'listo' ? 4 : 2)}<div class="box">${bienvenidaLider()}</div></div>`;
     if (!S.bmkHref) prepararBoton().then(() => { const a = $('#bmk'); if (a) a.href = S.bmkHref; });
@@ -1106,11 +1165,13 @@ function renderBienvenida() {
 window.addEventListener('message', async (e) => {
   if (e.source !== window || e.origin !== location.origin || e.data?.pe !== 'ext-hola') return;
   const antes = S.ext; S.ext = e.data;
-  if (S.token && S.data?.me && !S.extConfigurada) {
+  if (ED_LIDER && S.token && S.data?.me && !S.extConfigurada) {
     S.extConfigurada = true;
     try { const { key } = await api('/api/import-key'); window.postMessage({ pe: 'ext-config', clave: key, as_url: S.data.settings.as_url || '', reporte: URL_REPORTE, cadaHoras: 3 }, location.origin); } catch { S.extConfigurada = false; }
   }
   const c = $('#extcard'); if (c && JSON.stringify(antes) !== JSON.stringify(S.ext)) c.outerHTML = tarjetaExtension();
+  if (ED_LIDER && S.bv?.paso === 'ext') render();
+  if (ED_LIDER && !antes && !S.bv && S.data) render();
 });
 setInterval(() => { if (S.ext) window.postMessage({ pe: 'ext-estado' }, location.origin); }, 60000);
 function tarjetaExtension() {
@@ -1172,11 +1233,11 @@ const qs = new URLSearchParams(location.search);
   const con = qs.get('conectar');
   if (con) {
     history.replaceState(null, '', '/');
-    try { const r = await api('/api/conectar/usar', 'POST', { token: con }); S.token = r.token; localStorage.setItem('pe_token', r.token); sessionStorage.setItem('pe_claude', '1'); toast(`Conectado como ${r.nombre}`); }
+    try { const r = await api('/api/conectar/usar', 'POST', { token: con }); S.token = r.token; localStorage.setItem(TOKEN_KEY, r.token); sessionStorage.setItem('pe_claude', '1'); toast(`Conectado como ${r.nombre}`); }
     catch (e) { if (!S.token) { $('#app').innerHTML = `<div class="login"><div class="box"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${h(e.message)}</p></div></div>`; return; } toast(e.message); }
   }
   if (S.token) {
-    try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); tomarUsuario(); } catch { /* nada */ }
+    try { S.data = separarPruebas(JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')); tomarUsuario(); } catch { /* nada */ }
     if (S.data) render(); if (S.view === 'ajustes') { loadCal(); setTimeout(prepararBoton, 300); } await load();
     if (qs.get('invitacion')) { toast('Ya tenés una sesión abierta: para usar la invitación, cerrá sesión en Ajustes o abrí el link en otro navegador.'); }
     const n = qs.get('nuevo'); if (n === 'lb') openDrawer(lbForm()); else if (n === 'red') openDrawer(redForm()); else if (n === 'horas') openDrawer(hoursForm());

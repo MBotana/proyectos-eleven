@@ -7,7 +7,7 @@ import { PROMPTS_INICIALES, PROMPTS_VERSION } from './prompts.ts';
 import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays, tipoHoras, QUIEN, DOC_EDITABLE_LB } from '../public/shared.js';
 
 /** Usuario de la sesión (cada uno ve solo lo suyo). */
-export interface User { id: string; nombre: string; email: string; admin: number; modo?: string; alcance?: string }
+export interface User { id: string; nombre: string; email: string; admin: number; modo?: string; alcance?: string; edicion?: string }
 export interface Env { DB: any; ASSETS?: any; U?: User }
 const uidOf = (env: Env) => { if (!env.U) throw Object.assign(new Error('Sin usuario'), { status: 401 }); return env.U.id; };
 const yoOf = (env: Env) => env.U?.nombre || YO;
@@ -104,8 +104,8 @@ async function userBySetting(env: Env, key: string, value: string): Promise<User
   return r ? userById(env, String(r.key).split(':')[0]) : null;
 }
 async function userById(env: Env, id: string): Promise<User | null> {
-  const u: any = await env.DB.prepare('SELECT id, nombre, email, admin, modo, alcance FROM users WHERE id = ?').bind(id).first();
-  return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico', alcance: u.alcance || 'propio' } : null;
+  const u: any = await env.DB.prepare('SELECT id, nombre, email, admin, modo, alcance, edicion FROM users WHERE id = ?').bind(id).first();
+  return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico', alcance: u.alcance || 'propio', edicion: u.edicion || 'completa' } : null;
 }
 export const conUsuario = (env: Env, U: User): Env => ({ ...env, U });
 const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: '', reporte_at: '' };
@@ -627,7 +627,7 @@ async function allData(env: Env) {
   const auto = await horasAuto(env, desde);
   return {
     projects,
-    me: env.U, usuarios: env.U?.admin ? ((await env.DB.prepare('SELECT id, nombre, email, admin, modo, alcance, created_at FROM users ORDER BY created_at').all()).results) : [],
+    me: env.U, usuarios: env.U?.admin ? ((await env.DB.prepare('SELECT id, nombre, email, admin, modo, alcance, edicion, created_at FROM users ORDER BY created_at').all()).results) : [],
     reporte: await q('SELECT r.* FROM reporte r JOIN projects p ON p.code = r.proyecto AND p.uid = ? ORDER BY r.tipo, r.cliente, r.proyecto'),
     lb: await q('SELECT * FROM lb_tasks WHERE uid = ? ORDER BY CASE WHEN deadline = \'\' THEN 1 ELSE 0 END, deadline, created_at'),
     red: await q('SELECT * FROM redacciones WHERE uid = ? ORDER BY CASE WHEN fecha_entrega = \'\' THEN 1 ELSE 0 END, fecha_entrega, created_at'),
@@ -699,6 +699,18 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       return json({ token: await newSession(env, 'u1') });
     }
     // alta con invitación: nombre igual que en AppSheet, mail y contraseña
+    if (path === '/api/signup' && m === 'POST' && (await req.clone().json().catch(() => ({})) as any).edicion === 'lider') {
+      if (await throttled(env)) return fail('Demasiados intentos. Probá en 15 minutos.', 429);
+      const b = await body(), nombre = str(b.nombre, 80), email = str(b.email, 120).toLowerCase();
+      if (nombre.length < 3) return fail('Escribí tu nombre tal como aparece en AppSheet');
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('El mail no parece válido');
+      if (typeof b.password !== 'string' || b.password.length < 8) return fail('La contraseña debe tener al menos 8 caracteres');
+      if (await env.DB.prepare("SELECT 1 AS x FROM users WHERE edicion = 'lider' AND (lower(email) = ? OR lower(nombre) = lower(?))").bind(email, nombre).first()) return fail('Ya hay una cuenta de líder con ese mail o ese nombre: ingresá con tu contraseña', 409);
+      const id = newId();
+      await env.DB.prepare("INSERT INTO users (id, nombre, email, pw, admin, created_at, modo, alcance, edicion) VALUES (?, ?, ?, ?, 0, ?, 'lider', 'lider', 'lider')").bind(id, nombre, email, await hashPw(b.password), Date.now()).run();
+      await putS(conUsuario(env, { id, nombre, email, admin: 0 }), 'import_key', b64u(rand(24)));
+      return json({ token: await newSession(env, id) });
+    }
     if (path === '/api/signup' && m === 'POST') {
       const b = await body(), tok = str(b.invitacion, 80);
       const inv: any = await env.DB.prepare("SELECT * FROM invites WHERE token = ? AND used_by = ''").bind(tok).first();
@@ -707,7 +719,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       if (nombre.length < 3) return fail('Escribí tu nombre tal como aparece en AppSheet');
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('El mail no parece válido');
       if (typeof b.password !== 'string' || b.password.length < 8) return fail('La contraseña debe tener al menos 8 caracteres');
-      if (await env.DB.prepare('SELECT 1 AS x FROM users WHERE lower(email) = ? OR lower(nombre) = lower(?)').bind(email, nombre).first()) return fail('Ya hay una cuenta con ese mail o ese nombre', 409);
+      if (await env.DB.prepare("SELECT 1 AS x FROM users WHERE edicion != 'lider' AND (lower(email) = ? OR lower(nombre) = lower(?))").bind(email, nombre).first()) return fail('Ya hay una cuenta con ese mail o ese nombre', 409);
       const id = newId();
       await env.DB.prepare('INSERT INTO users (id, nombre, email, pw, admin, created_at) VALUES (?, ?, ?, ?, 0, ?)').bind(id, nombre, email, await hashPw(b.password), Date.now()).run();
       await env.DB.prepare('UPDATE invites SET used_by = ? WHERE token = ?').bind(id, tok).run();
@@ -717,7 +729,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (path === '/api/login' && m === 'POST') {
       if (await throttled(env)) return fail('Demasiados intentos. Probá en 15 minutos.', 429);
       const b = await body(), quien = str(b.usuario, 120).toLowerCase();
-      const users = (await env.DB.prepare('SELECT * FROM users').all()).results as any[];
+      const ed = b.edicion === 'lider' ? 'lider' : 'completa';
+      const users = ((await env.DB.prepare('SELECT * FROM users').all()).results as any[]).filter((x) => (x.edicion || 'completa') === ed);
       const u = quien ? users.find(x => x.email === quien || String(x.nombre).toLowerCase() === quien) : users.length === 1 ? users[0] : null;
       if (!u || typeof b.password !== 'string' || !(await verifyPw(b.password, u.pw))) { await badTry(env); return fail(quien || users.length <= 1 ? 'Usuario o contraseña incorrectos' : 'Escribí tu mail o tu nombre', 401); }
       await putS(env, 'fails', '0'); return json({ token: await newSession(env, u.id) });
@@ -739,6 +752,9 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     const U = await authed(req, env);
     if (!U) return fail('Sesión vencida', 401);
     env = conUsuario(env, U);
+    // edición líder: solo lectura (nada de cambios, IA, conexiones ni ajustes)
+    if (U.edicion === 'lider' && m !== 'GET' && !['/api/logout', '/api/push'].includes(path)) return fail('La versión para líderes es solo de lectura', 403);
+    if (U.edicion === 'lider' && /^\/api\/(export|gas|ia\/|settings|prompts|planes|medios)/.test(path)) return fail('No disponible en la versión para líderes', 403);
     if (path === '/api/invites' && m === 'POST') {
       if (!U.admin) return fail('Solo quien administra la app puede invitar', 403);
       const token = b64u(rand(18));
