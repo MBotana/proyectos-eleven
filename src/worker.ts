@@ -697,11 +697,12 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     // alta con invitación: nombre igual que en AppSheet, mail y contraseña
     if (path === '/api/signup' && m === 'POST' && (await req.clone().json().catch(() => ({})) as any).edicion === 'lider') {
       if (await throttled(env)) return fail('Demasiados intentos. Probá en 15 minutos.', 429);
-      const b = await body(), nombre = str(b.nombre, 80), email = str(b.email, 120).toLowerCase();
-      if (nombre.length < 3) return fail('Escribí tu nombre tal como aparece en AppSheet');
+      const b = await body(), email = str(b.email, 120).toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('El mail no parece válido');
+      // el nombre sale del mail (nombre.apellido → Nombre Apellido); al leer AppSheet se reemplaza por el que figura en las tareas
+      const nombre = email.split('@')[0].split(/[._-]+/).filter(Boolean).map((x) => x[0].toUpperCase() + x.slice(1)).join(' ').slice(0, 80);
       if (typeof b.password !== 'string' || b.password.length < 8) return fail('La contraseña debe tener al menos 8 caracteres');
-      if (await env.DB.prepare("SELECT 1 AS x FROM users WHERE edicion = 'lider' AND (lower(email) = ? OR lower(nombre) = lower(?))").bind(email, nombre).first()) return fail('Ya hay una cuenta de líder con ese mail o ese nombre: ingresá con tu contraseña', 409);
+      if (await env.DB.prepare("SELECT 1 AS x FROM users WHERE edicion = 'lider' AND lower(email) = ?").bind(email).first()) return fail('Ya hay una cuenta de líder con ese mail: ingresá con tu contraseña', 409);
       const id = newId();
       await env.DB.prepare("INSERT INTO users (id, nombre, email, pw, admin, created_at, modo, alcance, edicion) VALUES (?, ?, ?, ?, 0, ?, 'lider', 'lider', 'lider')").bind(id, nombre, email, await hashPw(b.password), Date.now()).run();
       await putS(conUsuario(env, { id, nombre, email, admin: 0 }), 'import_key', b64u(rand(24)));

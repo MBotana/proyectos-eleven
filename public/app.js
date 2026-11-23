@@ -119,8 +119,8 @@ function renderLogin() {
 function renderLoginLider() {
   const alta = S.altaLider !== false;
   $('#app').innerHTML = `<div class="login">${pasosLider(0)}<form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven · Líderes</h1>
-    <p>${alta ? 'Creá tu cuenta. Tu nombre tiene que ser igual al de AppSheet.' : 'Ingresá con tu mail y tu contraseña.'}</p>
-    ${alta ? `<label>Nombre (igual que en AppSheet)<input name="nombre" required minlength="3" placeholder="Nombre Apellido" autofocus></label><label>Mail de Eleven<input name="email" type="email" required autocomplete="email"></label>`
+    <p>${alta ? 'Creá tu cuenta con tu mail de Eleven. Tu nombre se toma de AppSheet.' : 'Ingresá con tu mail y tu contraseña.'}</p>
+    ${alta ? `<label>Mail de Eleven<input name="email" type="email" required autocomplete="email" autofocus></label>`
       : `<label>Mail<input name="usuario" type="email" autocomplete="username" autofocus></label>`}
     <label>Contraseña<input type="password" name="pw" autocomplete="${alta ? 'new-password' : 'current-password'}" required minlength="8"></label>
     <button class="btn full" style="margin-top:14px">${alta ? 'Crear cuenta' : 'Entrar'}</button><div class="err" id="lerr"></div>
@@ -973,7 +973,7 @@ document.addEventListener('submit', async (ev) => {
   ev.preventDefault(); const f = ev.target;
   if (f.id === 'loginf') {
     try {
-      const r = ED_LIDER ? await api(S.altaLider !== false ? '/api/signup' : '/api/login', 'POST', S.altaLider !== false ? { edicion: 'lider', nombre: f.nombre.value, email: f.email.value, password: f.pw.value } : { edicion: 'lider', usuario: f.usuario.value, password: f.pw.value })
+      const r = ED_LIDER ? await api(S.altaLider !== false ? '/api/signup' : '/api/login', 'POST', S.altaLider !== false ? { edicion: 'lider', email: f.email.value, password: f.pw.value } : { edicion: 'lider', usuario: f.usuario.value, password: f.pw.value })
         : S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
         : S.setup ? await api('/api/setup', 'POST', { nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
         : await api('/api/login', 'POST', { usuario: f.usuario.value, password: f.pw.value });

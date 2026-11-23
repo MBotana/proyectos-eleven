@@ -344,7 +344,7 @@ test('conectar Claude: enlace de un solo uso, objetivos del reporte y link de Ap
 test('líder: nombre desde AppSheet y Reporte cruzado por código de proyecto', async () => {
   const env = mkEnv();
   await call(env, '/api/setup', 'POST', { nombre: 'Martín Botana', email: 'm@x.com', password: 'clave-segura-1' });
-  const tl = (await call(env, '/api/signup', 'POST', { edicion: 'lider', nombre: 'Martin B', email: 'martin.botana@x.com', password: 'clave-segura-3' })).j.token;
+  const tl = (await call(env, '/api/signup', 'POST', { edicion: 'lider', email: 'martin.botana@x.com', password: 'clave-segura-3' })).j.token;
   const key = (await call(env, '/api/import-key', 'GET', undefined, tl)).j.key;
   const post = async (path: string, body: any, origin?: string) => (await handle(new Request('https://pe.test' + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': key, ...(origin ? { origin } : {}) }, body: JSON.stringify(body) }), env as any)).json() as any;
   // el Reporte nombra a otro líder (el PM): no suma proyectos por nombre
