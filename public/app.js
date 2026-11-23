@@ -41,10 +41,16 @@ const IC = {
 Object.assign(IC, { tablero: IC.inicio, lproyectos: IC.proyectos, lalertas: IC.alertas, lajustes: IC.ajustes });
 const ic = (k) => `<svg class="i" viewBox="0 0 24 24">${IC[k]}</svg>`;
 
+/** Borra todo lo que la app guardó en este navegador (sesión, copia de datos, bienvenida, instalación). */
+function borrarTodoLocal() {
+  for (const k of Object.keys(localStorage)) if (k.startsWith('pe_')) localStorage.removeItem(k);
+  try { sessionStorage.clear(); } catch { /* nada */ }
+  S.token = ''; S.data = null;
+}
 async function api(path, method = 'GET', body) {
   const r = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(S.token ? { authorization: 'Bearer ' + S.token } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 && S.token && path !== '/api/login') { S.token = ''; localStorage.removeItem('pe_token'); render(); }
+  if (r.status === 401 && S.token && path !== '/api/login') { borrarTodoLocal(); location.replace('/'); return new Promise(() => {}); } // la cuenta ya no existe: se borra todo lo guardado y se arranca de cero
   if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
   return j;
 }
@@ -935,7 +941,7 @@ document.addEventListener('click', async (ev) => {
     case 'push': enablePush(); break;
     case 'pushtest': { const r = await api('/api/push/test', 'POST'); $('#pushmsg').textContent = r.delivered ? 'Aviso de prueba enviado.' : 'Todavía no activaste los avisos en ninguna computadora.'; break; }
     case 'export': { const d = await api('/api/export'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })); a.download = `proyectos-eleven-${hoy()}.json`; a.click(); break; }
-    case 'logout': await api('/api/logout', 'POST').catch(() => {}); S.token = ''; localStorage.removeItem('pe_token'); render(); break;
+    case 'logout': await api('/api/logout', 'POST').catch(() => {}); borrarTodoLocal(); location.replace('/'); break;
   }
 });
 document.addEventListener('change', async (ev) => {
