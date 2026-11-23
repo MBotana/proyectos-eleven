@@ -44,7 +44,7 @@ Todo se hace en el navegador, con **las sesiones del usuario**: el navegador int
 ## 1. Traer de AppSheet (solo lectura)
 
 1. En la pestaña de APP: `await PE.traer()` devuelve `{ clave, origen }`.
-2. En la pestaña de AppSheet, con la app abierta, ejecutá (reemplazando CLAVE y ORIGEN):
+2. **Poné la pestaña de AppSheet al frente** (que sea la pestaña activa y visible: AppSheet no dibuja las tablas en una pestaña de fondo) y, con la app abierta, ejecutá (reemplazando CLAVE y ORIGEN):
 
    ```js
    const url = ORIGEN + '/traer.js?v=' + Date.now();
@@ -57,6 +57,9 @@ Todo se hace en el navegador, con **las sesiones del usuario**: el navegador int
    ```
 
    No esperes el resultado: tarda entre 1 y 3 minutos. Consultá `window.__peEstado` cada 15 segundos hasta que empiece con "listo" o con "no se pudo". No toques la pestaña mientras tanto.
+   - Mientras lee, la pestaña de AppSheet tiene que seguir **al frente**: no cambies de pestaña ni la minimices.
+   - Si termina en "no se pudo… no cargó" o "…se leyó vacía", traé la pestaña de AppSheet al frente y repetí este paso **una vez**. Si vuelve a fallar, avisale al usuario con ese texto y no sigas.
+   - El resumen final tiene que decir cuántos links **y** cuántas redacciones llegaron; si alguno es 0, no lo des por bueno.
    - Si el script no carga por políticas de la página, pedí en APP `await PE.codigoTraer()` y ejecutá ese texto tal cual en la pestaña de AppSheet.
 3. En APP: `await PE.actualizar()`.
 

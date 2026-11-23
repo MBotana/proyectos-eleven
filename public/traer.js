@@ -10,9 +10,12 @@ async function traerDeAppSheet(K, O) {
   document.body.appendChild(box);
   const msg = (t) => { box.textContent = 'Proyectos Eleven · ' + t; window.__peEstado = t; };
   const espera = (ms) => new Promise((r) => setTimeout(r, ms));
-  const ir = async (v) => {
+  // espera a que la vista tenga filas de verdad (hasta 90 s). AppSheet no dibuja las tablas si la pestaña no está a la vista.
+  const ir = async (v, re) => {
     location.hash = 'appName=' + app + '&view=' + v + '&vss='; // vss vacío: tablero sin proyecto seleccionado
-    for (let i = 0; i < 40; i++) { await espera(500); if (document.querySelector('.TableView .TableViewRow')) break; }
+    const hay = () => [...document.querySelectorAll('.TableView .TableViewRow')].some((f) => [...f.children].some((c) => re.test(c.innerText.trim())));
+    for (let i = 0; i < 180 && !hay(); i++) { if (i % 10 === 0) msg(`esperando que cargue ${v === 'Tasks' ? 'Gestión Content' : 'Gestión Link Building'}… (dejá esta pestaña a la vista)`); await espera(500); }
+    if (!hay()) throw new Error(`${v === 'Tasks' ? 'Gestión Content' : 'Gestión Link Building'} no cargó. Dejá la pestaña de AppSheet a la vista y volvé a intentar.`);
     await espera(1500);
   };
   const leer = async (tv, re) => {
@@ -33,15 +36,17 @@ async function traerDeAppSheet(K, O) {
   };
   try {
     msg('leyendo Gestión Link Building…');
-    await ir('Link_Building');
+    await ir('Link_Building', /^[A-Z0-9]{2,5}-LIN-[\d.]+-\d+$/);
     let tvs = [...document.querySelectorAll('.TableView')];
     const proyectos = [], clientes = {};
     for (const f of await leer(tvs[0], /^[A-Z0-9]{2,5}-LIN-[\d.]+$/)) { proyectos.push(f.c[0]); clientes[f.c[0]] = f.primera[0]; }
     tvs = [...document.querySelectorAll('.TableView')];
     const lb = (await leer(tvs[tvs.length - 1], /^[A-Z0-9]{2,5}-LIN-[\d.]+-\d+$/)).map((f) => { const c = f.c; return [c[0], f.grupo, c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10]]; });
+    if (!lb.length || !proyectos.length) throw new Error('Gestión Link Building se leyó vacía. Dejá la pestaña de AppSheet a la vista y volvé a intentar.');
     msg(`${lb.length} links leídos. Leyendo Gestión Content…`);
-    await ir('Tasks');
+    await ir('Tasks', /^[A-Z0-9]{2,5}-RED-[\d.]+-\d+$/);
     const red = (await leer(document.querySelector('.TableView'), /^[A-Z0-9]{2,5}-RED-[\d.]+-\d+$/)).map((f) => f.c.slice(0, 12));
+    if (!red.length) throw new Error('Gestión Content se leyó vacía. Dejá la pestaña de AppSheet a la vista y volvé a intentar.');
     msg(`${lb.length} links y ${red.length} redacciones leídos. Enviando…`);
     const tot = { lb: 0, red: 0, nuevos: [] };
     const enviar = async (cuerpo) => {
