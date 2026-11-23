@@ -56,6 +56,7 @@ export const MIGRATIONS = [
   `ALTER TABLE users ADD COLUMN modo TEXT NOT NULL DEFAULT 'tecnico'`,
   // sincronización con AppSheet en etapas: se recibe todo, se revisa y recién ahí se aplica de una vez
   `CREATE TABLE IF NOT EXISTS sync_runs (sid TEXT PRIMARY KEY, uid TEXT NOT NULL, clave TEXT NOT NULL, created_at INTEGER NOT NULL, estado TEXT NOT NULL DEFAULT 'leyendo', informe TEXT NOT NULL DEFAULT '')`,
+  `ALTER TABLE sync_runs ADD COLUMN tipo TEXT NOT NULL DEFAULT 'completa'`,
   `CREATE TABLE IF NOT EXISTS sync_stage (sid TEXT NOT NULL, parte TEXT NOT NULL, lectura INTEGER NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (sid, parte, lectura, seq))`,
 ];
 

@@ -459,3 +459,53 @@ test('sincronización: conversiones de AppSheet', async () => {
   for (const c of ['MER-RED-SQ-3-12', 'LAV-RED-5-1']) assert.ok(RE.tareaRED.test(c), c);
   assert.ok(!RE.tareaLIN.test('GAL-LIN-1')); assert.ok(!RE.tareaRED.test('Abrir tarea'));
 });
+
+// ======================= favorito «Sincronizar» (sin Claude) =======================
+async function favorito(env: any, tok: string, tipo: 'appsheet' | 'reporte', partes: [string, string[], any[]][], origin = 'https://www.appsheet.com') {
+  const key = (await call(env, '/api/import-key', 'GET', undefined, tok)).j.key;
+  const ini = await handle(new Request('https://pe.test/api/sync/iniciar-clave', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': key, origin }, body: JSON.stringify({ tipo }) }), env);
+  const s: any = await ini.json();
+  for (const l of [1, 2]) for (const [parte, enc, filas] of partes) await lote(env, s.sid, s.clave, parte, l, enc, filas, { as_email: 'martin.botana@agenciaeleven.com', as_url: 'https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046?platform=desktop#appName=AEApp-Production-609550914-25-02-20&view=Tasks' }, origin);
+  const r = await handle(new Request('https://pe.test/api/sync/cerrar', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sync-key': s.clave, origin }, body: JSON.stringify({ sid: s.sid }) }), env);
+  return { status: r.status, j: await r.json() as any, cors: r.headers.get('access-control-allow-origin'), ini };
+}
+test('favorito: AppSheet se sincroniza solo desde tu navegador, y el reporte trae solo objetivos', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@agenciaeleven.com', password: 'clave-segura-1' })).j.token;
+  await env.DB.prepare('DELETE FROM projects').run();
+  // sin clave válida no arranca
+  const mal = await handle(new Request('https://pe.test/api/sync/iniciar-clave', { method: 'POST', headers: { 'x-import-key': 'clave-falsa-de-relleno-1234567' } }), env);
+  assert.equal(mal.status, 401);
+  // el reporte antes que AppSheet: no hay proyectos todavía
+  const antes = await favorito(env, tok, 'reporte', [['objLin', H_OBJ, [OBJ('GAL-LIN-1', 3)]], ['objRed', H_OBJ, [OBJ('GAL-RED-1', 8)]]], 'https://datastudio.google.com');
+  assert.equal(antes.status, 409); assert.match(antes.j.informe.errores.join(' '), /primero sincronizá AppSheet/);
+  // AppSheet: revisa y aplica en el mismo paso, sin pasar por la app ni por Claude
+  const as = await favorito(env, tok, 'appsheet', [['lbProy', H_PROY, [PROY('GAL-LIN-1')]], ['lb', H_LB, [LB('GAL-LIN-1-1'), LB('GAL-LIN-1-2')]], ['red', H_RED, [RED('GAL-RED-1-1')]]]);
+  assert.equal(as.status, 200, JSON.stringify(as.j)); assert.equal(as.cors, 'https://www.appsheet.com');
+  assert.equal(as.j.aplicado, true); assert.equal(as.j.verificacion.ok, true); assert.equal(as.j.links.total, 2);
+  assert.ok(!as.j.advertencias.some((a: string) => /Reporte/.test(a)), 'desde AppSheet no se espera el reporte');
+  // reporte: solo objetivos, no toca las tareas
+  const rep = await favorito(env, tok, 'reporte', [['objLin', H_OBJ, [OBJ('GAL-LIN-1', 3), OBJ('MER-LIN-9', 60)]], ['objRed', H_OBJ, [OBJ('XUB-RED-1', 15)]]], 'https://datastudio.google.com');
+  assert.equal(rep.status, 200, JSON.stringify(rep.j)); assert.equal(rep.j.verificacion.ok, true);
+  assert.deepEqual(rep.j.objetivos.sinObjetivo, ['GAL-RED-1']);
+  const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.lb.length, 2); assert.equal(d.projects.find((p: any) => p.code === 'GAL-LIN-1').params.linksMes, 3);
+  assert.equal(d.projects.find((p: any) => p.code === 'GAL-RED-1').params.piezasMes, null, 'sin objetivo, no se inventa');
+  assert.ok(d.settings.obj_at); assert.equal(d.sync_pend, null);
+});
+test('favorito: si hay cambios sospechosos queda esperando tu confirmación en la app', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@agenciaeleven.com', password: 'clave-segura-1' })).j.token;
+  const lb = [...Array(12)].map((_, i) => LB('GAL-LIN-1-' + (i + 1)));
+  await favorito(env, tok, 'appsheet', [['lbProy', H_PROY, [PROY('GAL-LIN-1')]], ['lb', H_LB, lb], ['red', H_RED, [RED('GAL-RED-1-1')]]]);
+  const r = await favorito(env, tok, 'appsheet', [['lbProy', H_PROY, [PROY('GAL-LIN-1')]], ['lb', H_LB, lb.slice(0, 2)], ['red', H_RED, [RED('GAL-RED-1-1')]]]);
+  assert.equal(r.j.pendienteConfirmacion, true);
+  let d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.lb.length, 12, 'no se aplicó nada'); assert.ok(d.sync_pend); assert.match(d.sync_pend.motivos.join(' '), /10 links ya no están/);
+  // descartar
+  await call(env, '/api/sync/descartar', 'POST', { sid: d.sync_pend.sid }, tok);
+  d = (await call(env, '/api/data', 'GET', undefined, tok)).j; assert.equal(d.sync_pend, null); assert.equal(d.lb.length, 12);
+  // o confirmar desde la app
+  const r2 = await favorito(env, tok, 'appsheet', [['lbProy', H_PROY, [PROY('GAL-LIN-1')]], ['lb', H_LB, lb.slice(0, 2)], ['red', H_RED, [RED('GAL-RED-1-1')]]]);
+  const ok = await call(env, '/api/sync/aplicar', 'POST', { sid: r2.j.informe.sid, confirmar: true }, tok);
+  assert.equal(ok.status, 200); assert.equal(ok.j.verificacion.ok, true);
+  d = (await call(env, '/api/data', 'GET', undefined, tok)).j; assert.equal(d.lb.length, 2); assert.equal(d.sync_pend, null);
+});

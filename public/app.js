@@ -99,23 +99,29 @@ function syncInfo() {
   try { info = JSON.parse(st.as_sync_info || '{}') || {}; } catch { /* sin info */ }
   return { at, hoy: !!at && hoyEn(undefined, at) === hoy(), info };
 }
-const botonSync = () => `<button class="btn" data-act="sync" ${S.syncEsperando ? 'disabled' : ''} title="Claude lee AppSheet y el reporte de seguimiento (dos veces cada tabla), valida todo y recién ahí actualiza la app">${ic('refresh')}${S.syncEsperando ? 'Sincronizando…' : 'Sincronizar'}</button>`;
+const botonSync = () => `<button class="btn" data-act="sync" title="Abre AppSheet en tu navegador: ahí tocás el favorito «⟳ Sincronizar Eleven» y tus datos llegan solos">${ic('refresh')}Sincronizar</button>`;
+const asUrl = () => linkAS(S.data?.settings?.as_url) || AS_URL_ELEVEN;
+const linkAS = (v) => (/^https:\/\/www\.appsheet\.com\/start\/[\w-]+\?platform=desktop#appName=/.test(v || '') ? v : '');
+const REPORTE_URL = 'https://datastudio.google.com/u/0/reporting/21888fb7-9f40-4059-98ea-e9a1c198eb08/page/73rOF';
 function bannerSync() {
-  const s = syncInfo(), box = (cls, html) => `<div class="alert ${cls}" style="margin:0 0 16px">${html}</div>`;
-  if (S.syncEsperando) return box('info', `<b>Sincronizando con AppSheet…</b> Claude está leyendo AppSheet y el reporte (dos veces cada tabla). Esta ventana se actualiza sola cuando termine. <button class="lnk small" data-act="synccancel">Dejar de esperar</button>`);
+  const s = syncInfo(), box = (cls, html) => `<div class="alert ${cls}" style="margin:0 0 16px">${html}</div>`, pend = S.data?.sync_pend;
+  if (pend) return box('warn', `<b>La última sincronización está esperando tu confirmación</b> (la lectura salió bien, pero hay cambios grandes). Todavía no se aplicó nada:<ul class="warnlist" style="margin:6px 0">${pend.motivos.map((m) => `<li>• ${h(m)}</li>`).join('')}</ul><span class="btnrow"><button class="btn sm" data-act="syncconf" data-sid="${h(pend.sid)}">Confirmar y aplicar</button><button class="btn sm sec" data-act="syncdesc" data-sid="${h(pend.sid)}">Descartar</button></span>`);
+  if (S.syncEsperando) return box('info', `<b>Esperando tus datos…</b> En la pestaña de AppSheet que se abrió, tocá el favorito <b>⟳ Sincronizar Eleven</b> y esperá a que el cartel azul se ponga verde. Esta ventana se actualiza sola. <button class="lnk small" data-act="abrirAS">Abrir AppSheet otra vez</button> · <button class="lnk small" data-act="synccancel">Dejar de esperar</button>`);
   if (!s.at) return box('info', '<b>Todavía no hay datos de AppSheet.</b> Tocá <b>Sincronizar</b> para traerlos.');
   if (s.info.verificado === false) return box('bad', `<b>La última sincronización (${fmtHora(s.at)}) no pasó la verificación.</b> No tomes decisiones con estos datos: volvé a sincronizar.`);
   if (!s.hoy) return box('warn', `<b>Estos datos son del ${fmtHora(s.at)}.</b> Tocá <b>Sincronizar</b> para traer lo que hay hoy en AppSheet.`);
   return '';
 }
 function renderSyncSide() {
-  const el = $('#sidetimer'); if (!el) return; const s = syncInfo();
-  el.innerHTML = `<div class="lbl">Datos de AppSheet</div><div class="small" style="margin:2px 0 8px">${s.at ? `<b class="t-${s.hoy && s.info.verificado !== false ? 'ok' : 'warn'}">${s.hoy ? 'Hoy ' + new Date(s.at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : fmtHora(s.at)}</b>${s.info.links !== undefined ? `<div class="mute">${s.info.links} links · ${s.info.redacciones} redacciones</div>` : ''}${s.info.objetivos ? `<div class="mute">Objetivos del ${fmtD(s.info.objetivos)}</div>` : ''}` : '<span class="mute">Sin sincronizar</span>'}</div>${botonSync().replace('class="btn"', 'class="btn full sm"')}`;
+  const el = $('#sidetimer'); if (!el) return; const s = syncInfo(), obj = S.data?.settings?.obj_at;
+  el.innerHTML = `<div class="lbl">Datos de AppSheet</div><div class="small" style="margin:2px 0 8px">${s.at ? `<b class="t-${s.hoy && s.info.verificado !== false ? 'ok' : 'warn'}">${s.hoy ? 'Hoy ' + new Date(s.at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : fmtHora(s.at)}</b>${s.info.links !== undefined ? `<div class="mute">${s.info.links} links · ${s.info.redacciones} redacciones</div>` : ''}` : '<span class="mute">Sin sincronizar</span>'}
+    <div class="mute">Objetivos: ${obj ? 'del ' + fmtD(obj) : 'sin leer'} · <button class="lnk small" data-act="abrirRep" title="Abre el reporte de seguimiento: tocá ahí el mismo favorito">actualizar</button></div></div>${botonSync().replace('class="btn"', 'class="btn full sm"')}`;
 }
-/** Abre Claude con el pedido y espera (consultando la app cada 10 s) a que lleguen los datos nuevos. */
-function sincronizar() {
-  sincronizarConClaude('sincronizar');
-  S.syncEsperando = { desde: Date.now(), antes: syncInfo().at }; sessionStorage.setItem('pe_sync', JSON.stringify(S.syncEsperando));
+/** Abre AppSheet en el navegador (ahí se toca el favorito) y espera, consultando cada 5 s, a que lleguen los datos nuevos. */
+function sincronizar(cual = 'as') {
+  window.open(cual === 'rep' ? REPORTE_URL : asUrl(), '_blank', 'noopener');
+  S.syncEsperando = { desde: Date.now(), antes: syncInfo().at, obj: S.data?.settings?.obj_at || '', cual }; sessionStorage.setItem('pe_sync', JSON.stringify(S.syncEsperando));
+  toast(cual === 'rep' ? 'En el reporte, tocá el favorito «⟳ Sincronizar Eleven»' : 'En AppSheet, tocá el favorito «⟳ Sincronizar Eleven»');
   esperarSync(); render();
 }
 function esperarSync() {
@@ -123,15 +129,18 @@ function esperarSync() {
   S.syncPoll = setInterval(async () => {
     if (!S.syncEsperando || Date.now() - S.syncEsperando.desde > 30 * 60000) return terminarEspera();
     await load();
-    const s = syncInfo();
-    if (s.at > S.syncEsperando.antes) { localStorage.setItem('pe_skill', '1'); terminarEspera(); toast(s.info.verificado === false ? 'Llegaron datos, pero no pasaron la verificación' : `Datos de AppSheet actualizados: ${s.info.links} links y ${s.info.redacciones} redacciones`); }
-  }, 10000);
+    const s = syncInfo(), e = S.syncEsperando;
+    if (!e) return;
+    if (S.data.sync_pend) return terminarEspera();
+    if (s.at > e.antes) { terminarEspera(); toast(s.info.verificado === false ? 'Llegaron datos, pero no pasaron la verificación' : `Datos de AppSheet actualizados: ${s.info.links} links y ${s.info.redacciones} redacciones`); }
+    else if (e.cual === 'rep' && (S.data.settings.obj_at || '') !== e.obj) { terminarEspera(); toast('Objetivos del mes actualizados'); }
+  }, 5000);
 }
 function terminarEspera() { clearInterval(S.syncPoll); S.syncEsperando = null; sessionStorage.removeItem('pe_sync'); render(); }
 function renderLogin() {
   const alta = S.setup || S.invitacion;
   const intro = S.invitacion === false ? 'Esta invitación ya se usó o no existe. Pedile un link nuevo a quien te invitó.' : S.invitacion ? 'Te invitaron a Proyectos Eleven. Creá tu cuenta con tu mail de Eleven.' : S.setup ? 'Primera vez: creá tu cuenta con tu mail de Eleven.' : 'Ingresá con tu mail (o tu nombre) y tu contraseña.';
-  $('#app').innerHTML = `<div class="login">${S.invitacion ? pasosBienvenida(enApp() || localStorage.getItem('pe_instalada') ? 1 : 0) : ''}${S.invitacion && !enApp() ? cajaInstalar() : ''}<form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${intro}</p>
+  $('#app').innerHTML = `<div class="login onb">${alta && S.invitacion !== false ? pasosBienvenida(0) : ''}<form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${intro}</p>
     ${S.invitacion === false ? '' : alta ? `<label>Mail de Eleven<input name="email" type="email" required autocomplete="email" autofocus></label>`
       : `<label>Mail o nombre<input name="usuario" autocomplete="username" autofocus></label>`}
     ${S.invitacion === false ? '' : `<label>Contraseña<input type="password" name="pw" autocomplete="${alta ? 'new-password' : 'current-password'}" required minlength="8"></label>
@@ -897,7 +906,13 @@ document.addEventListener('click', async (ev) => {
       break;
     }
     case 'tab': S.f[el.dataset.f] = el.dataset.v; render(); break;
-    case 'sync': sincronizar(); break;
+    case 'sync': case 'abrirAS': sincronizar('as'); break;
+    case 'abrirRep': sincronizar('rep'); break;
+    case 'favok': localStorage.setItem('pe_fav', '1'); render(); break;
+    case 'favnueva': if (confirm('El botón que tenés en favoritos deja de funcionar y vas a tener que arrastrar el nuevo. ¿Seguir?')) { await armarFavorito(true); toast('Clave nueva: borrá el favorito viejo y arrastrá este'); } break;
+    case 'bvsininstalar': localStorage.setItem('pe_instalada', '1'); render(); break;
+    case 'syncconf': { const r = await PE.syncAplicar(el.dataset.sid, true); toast(r.aplicado ? (r.verificacion?.ok ? 'Cambios aplicados y verificados' : 'Se aplicó, pero la verificación encontró diferencias') : r.error || 'No se pudo aplicar'); await load(); break; }
+    case 'syncdesc': await api('/api/sync/descartar', 'POST', { sid: el.dataset.sid }); toast('Descartado: los datos quedan como estaban'); await load(); break;
     case 'synccancel': terminarEspera(); break;
     case 'lproy': S.f.lProj = el.dataset.p; S.view = 'lproyectos'; render(); $('#view').scrollTop = 0; break;
     case 'verproy': { const p = proj(el.dataset.p); if (p?.tipo === 'RED') { S.view = 'red'; Object.assign(S.f, { redProj: p.code, redEstado: 'activas', redUser: '' }); } else { S.view = 'lb'; Object.assign(S.f, { lbProj: el.dataset.p, lbEstado: 'activas', lbUser: '' }); } render(); break; }
@@ -918,7 +933,7 @@ document.addEventListener('click', async (ev) => {
     case 'claudeinst': instalarSkill(); break;
     case 'instalarapp': if (instalarEvt) { instalarEvt.prompt(); const r = await instalarEvt.userChoice; if (r.outcome === 'accepted') localStorage.setItem('pe_instalada', '1'); } break;
     case 'bvclaude': localStorage.setItem('pe_claude_via', el.dataset.via); S.bv = { paso: 'espera', via: el.dataset.via, desde: Date.now() - 5000 }; await abrirClaude('bienvenida', el.dataset.via); render(); break;
-    case 'bvsaltar': case 'bvfin': clearInterval(S.bvPoll); localStorage.setItem(claveBienv(), '1'); S.bv = null; if (el.dataset.act === 'bvsaltar') S.view = 'lajustes'; $('#app').innerHTML = ''; render(); break;
+    case 'bvsaltar': case 'bvfin': clearInterval(S.bvPoll); localStorage.setItem(claveBienv(), '1'); S.bvListo = false; $('#app').innerHTML = ''; render(); break;
     case 'guardarasurl': { const v = $('#asurl').value.trim(); await api('/api/settings', 'POST', { as_url: v }); await load(); toast(S.data.settings.as_url ? 'Link de AppSheet guardado' : 'El link tiene que empezar con https://www.appsheet.com/start/'); break; }
     case 'claudezip': descargarSkill(); break;
     case 'claudeok': localStorage.setItem('pe_skill', '1'); toast('Listo: la skill queda marcada como instalada'); render(); break;
@@ -1040,59 +1055,77 @@ async function descargarSkill() {
     a.download = 'proyectos-eleven.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   } catch (e) { toast(e.message); }
 }
-// ---------- bienvenida guiada (instalar → cuenta → Claude → tareas) ----------
+// ---------- bienvenida guiada (cuenta → botón en favoritos → instalar → primera sincronización) ----------
 let instalarEvt = null;
 const enApp = () => matchMedia('(display-mode: standalone)').matches;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); instalarEvt = e; const b = $('#instbtn'); if (b) b.disabled = false; });
-window.addEventListener('appinstalled', () => { instalarEvt = null; localStorage.setItem('pe_instalada', '1'); const c = $('#instbox'); if (c) c.innerHTML = '<b>App instalada.</b> Se abrió en su propia ventana (también la tenés en el escritorio y en el menú Inicio): seguí ahí.'; });
-function cajaInstalar() {
-  return `<div class="box onb-inst" id="instbox"><b>1. Instalá la app en tu escritorio</b><p class="small mute" style="margin:4px 0 10px">Queda con su propia ventana y su ícono, como cualquier programa.</p>
-    <button class="btn full" id="instbtn" data-act="instalarapp" ${instalarEvt ? '' : 'disabled'}>Instalar Proyectos Eleven</button><p class="small mute" style="margin:8px 0 0">Si el botón no se activa, abrí este link en Chrome o Edge. Si ya la instalaste, seguí con el paso 2.</p></div>`;
-}
+window.addEventListener('appinstalled', () => { instalarEvt = null; localStorage.setItem('pe_instalada', '1'); if (S.data && necesitaBienvenida()) render(); });
 function pasosBienvenida(hechos) {
-  const n = ['Instalá la app', 'Creá tu cuenta', 'Conectá Claude', 'Tus tareas'];
+  const n = ['Creá tu cuenta', 'Agregá el botón', 'Instalá la app', 'Traé tus datos'];
   return `<ol class="onb-pasos">${n.map((t, i) => `<li class="${i < hechos ? 'ok' : i === hechos ? 'on' : ''}"><span>${i < hechos ? '✓' : i + 1}</span>${t}</li>`).join('')}</ol>`;
 }
 const claveBienv = () => 'pe_bienv_' + (S.data?.me?.id || '');
 function necesitaBienvenida() {
-  if (!S.data?.me || sessionStorage.getItem('pe_claude') || localStorage.getItem(claveBienv())) return false;
-  return !S.data.settings.as_sync_at || !!S.bv;
+  if (!S.data?.me || localStorage.getItem(claveBienv())) return false;
+  return !S.data.settings.as_sync_at || !!S.bvListo;
+}
+/** Botón que se arrastra a la barra de favoritos: el nombre del favorito es su texto. */
+const botonFavorito = () => `<a class="btn favbtn" href="${h(S.favHref || '#')}" draggable="true" title="Arrastralo a tu barra de favoritos" onclick="return false">⟳ Sincronizar Eleven</a>`;
+/** Arma el favorito con tu clave (sale de /favorito.js, que solo lee la página y manda las lecturas a tu cuenta). */
+async function armarFavorito(nueva) {
+  try {
+    const [{ key, origin }, src] = await Promise.all([api('/api/import-key' + (nueva ? '?nueva=1' : '')), fetch('/favorito.js', { cache: 'no-store' }).then((r) => r.text())]);
+    const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n').replace('__CLAVE__', key).replace('__ORIGEN__', origin);
+    S.favHref = 'javascript:' + encodeURIComponent(code);
+    document.querySelectorAll('.favbtn').forEach((a) => { a.href = S.favHref; });
+  } catch (e) { toast(e.message); }
 }
 function renderBienvenida() {
-  const st = S.data.settings, me = S.data.me; S.bv = S.bv || { paso: 'claude' };
-  if (S.bv.paso === 'espera' && st.as_sync_at && Number(st.as_sync_at) > S.bv.desde) S.bv.paso = 'listo';
-  const nombre = h((me.nombre || '').split(' ')[0]);
-  let cuerpo;
-  if (S.bv.paso === 'claude') cuerpo = `<h1>Hola, ${nombre}</h1><p>Ahora conectamos tu Claude. Él abre AppSheet con tu sesión y trae tus proyectos y tareas (solo lee); vos solo iniciás sesión cuando te lo pida.</p>
-      <div class="onb-ops"><button class="onb-op" data-act="bvclaude" data-via="escritorio"><i class="tag acc">Recomendado</i><b>Claude de escritorio</b><span>La app de Claude en tu computadora</span></button>
-      <button class="onb-op" data-act="bvclaude" data-via="chrome"><b>Claude in Chrome</b><span>La extensión de Claude en tu Chrome</span></button></div>
-      <p class="small mute">¿No tenés Claude? <a href="https://claude.ai/download" target="_blank" rel="noopener">Descargá Claude de escritorio</a>, iniciá sesión y volvé a esta ventana.</p>`;
-  else if (S.bv.paso === 'espera') {
-    const con = Number(st.conectado_at) > S.bv.desde;
-    const it = (ok, t, d) => `<li class="${ok ? 'ok' : ''}"><span>${ok ? '✓' : '·'}</span><div><b>${t}</b>${d ? `<div class="small mute">${d}</div>` : ''}</div></li>`;
-    cuerpo = `<h1>Seguí en Claude</h1><p>Se abrió Claude con el mensaje escrito. Esta ventana se actualiza sola.</p>
-      <ul class="onb-check">${it(con, 'Enviá el mensaje', 'Tocá Enviar en Claude. Si te muestra la skill «proyectos-eleven», tocá Guardar.')}
-      ${it(con, 'Claude abre tu app', con ? 'Listo: ya la tiene abierta con tu sesión.' : 'Esperando…')}
-      ${it(false, 'Iniciá sesión en AppSheet', 'Claude te abre AppSheet: entrá con tu cuenta de Eleven y avisale. Después lee AppSheet y el reporte dos veces, revisa todo y recién ahí carga tus datos.')}
-      ${it(false, 'Tus tareas llegan acá', '<span class="spin"></span> Esperando a Claude…')}</ul>
-      <p class="small mute">¿No se abrió Claude? <button class="lnk small" data-act="bvclaude" data-via="${S.bv.via}">Abrirlo de nuevo</button> · <button class="lnk small" data-act="bvclaude" data-via="${S.bv.via === 'chrome' ? 'escritorio' : 'chrome'}">Usar ${S.bv.via === 'chrome' ? 'Claude de escritorio' : 'Claude in Chrome'}</button> · <button class="lnk small" data-act="bvsaltar">Hacerlo sin Claude</button></p>`;
+  const st = S.data.settings, nombre = h((S.data.me.nombre || '').split(' ')[0]);
+  if (st.as_sync_at) S.bvListo = true;
+  const instalada = enApp() || localStorage.getItem('pe_instalada');
+  const paso = st.as_sync_at ? 'listo' : !localStorage.getItem('pe_fav') && !enApp() ? 'favorito' : !instalada ? 'instalar' : 'datos';
+  let cuerpo = '', flecha = '';
+  if (paso === 'favorito') {
+    flecha = '<div class="flecha arriba centro">⬆ Soltalo acá: en la barra de favoritos</div>';
+    cuerpo = `<h1>Hola, ${nombre}</h1><p>Primero agregá el botón que trae tus datos de AppSheet. Va en la <b>barra de favoritos</b> de este navegador (la que está justo arriba de esta página).</p>
+      <ol class="steps"><li>Si no ves la barra de favoritos, apretá <b>Ctrl + Mayús + B</b>.</li>
+      <li>Arrastrá este botón hasta la barra y soltalo: <span style="display:inline-block;margin:6px 0">${botonFavorito()}</span></li></ol>
+      <p class="small mute">Solo lee AppSheet y el reporte de seguimiento: nunca cambia nada. Tiene una clave tuya, así que no lo compartas.</p>
+      <button class="btn" data-act="favok">Ya lo agregué</button>`;
+  } else if (paso === 'instalar') {
+    flecha = '<div class="flecha arriba derecha">⬆ o tocá este ícono (una pantallita con una flecha) en la barra de direcciones</div>';
+    cuerpo = `<h1>Instalá la app en tu escritorio</h1><p>Queda con su propia ventana y su ícono en el escritorio y en el menú Inicio, como cualquier programa.</p>
+      <button class="btn full" id="instbtn" data-act="instalarapp" ${instalarEvt ? '' : 'disabled'}>Instalar Proyectos Eleven</button>
+      <p class="small mute" style="margin-top:10px">Si el botón no se activa: menú <b>⋮</b> de Chrome → <b>Transmitir, guardar y compartir</b> → <b>Instalar página como app</b> (en Edge: <b>…</b> → <b>Aplicaciones</b> → <b>Instalar este sitio como una aplicación</b>).</p>
+      <p class="small mute">Cuando se abra la app, seguí ahí. <button class="lnk small" data-act="bvsininstalar">Seguir sin instalar</button></p>`;
+  } else if (paso === 'datos') {
+    const esp = !!S.syncEsperando;
+    cuerpo = `<h1>Traé tus datos de AppSheet</h1>
+      <ol class="steps"><li><button class="btn sm" data-act="abrirAS">Abrir AppSheet</button> <span class="small mute">se abre en tu navegador (Chrome o Edge). Si te pide, entrá con tu cuenta de Eleven.</span></li>
+      <li>Cuando cargue <b>Eleven - Operaciones</b>, tocá <b>⟳ Sincronizar Eleven</b> en tu barra de favoritos.</li>
+      <li>Aparece un cartel azul arriba a la derecha: lee todo dos veces (1 o 2 minutos). Dejá esa pestaña a la vista hasta que se ponga <b>verde</b>.</li></ol>
+      ${S.data.sync_pend ? bannerSync() : `<p class="small">${esp ? '<span class="spin"></span> Esperando tus datos… esta ventana se actualiza sola.' : '<span class="mute">Esta ventana se actualiza sola cuando lleguen.</span>'}</p>`}`;
   } else {
     const nl = S.data.lb.length, nr = S.data.red.length;
-    cuerpo = `<h1>¡Listo, ${nombre}!</h1><p>Trajimos <b>${nl} link${nl === 1 ? '' : 's'}</b> y <b>${nr} redaccion${nr === 1 ? '' : 'es'}</b> de AppSheet${S.data.projects.length ? ` de ${S.data.projects.length} proyecto${S.data.projects.length === 1 ? '' : 's'}` : ''}. </p>
+    cuerpo = `<h1>¡Listo, ${nombre}!</h1><p>Trajimos <b>${nl} link${nl === 1 ? '' : 's'}</b> y <b>${nr} redaccion${nr === 1 ? '' : 'es'}</b> de ${S.data.projects.filter((p) => p.active).length} proyectos, leídos dos veces y verificados.</p>
+      <p><b>Un paso más (una vez por mes): los objetivos.</b> <button class="btn sm sec" data-act="abrirRep">Abrir el reporte</button> y tocá el mismo favorito <b>⟳ Sincronizar Eleven</b>. ${st.obj_at ? '<span class="tag ok">Objetivos del ' + fmtD(st.obj_at) + '</span>' : ''}</p>
       <p class="small mute">La app no se actualiza sola: cada vez que quieras ver lo último de AppSheet (por ejemplo, al empezar el día), tocá <b>Sincronizar</b>.</p>
       <button class="btn" data-act="bvfin">Entrar a la app</button>`;
   }
-  $('#app').innerHTML = `<div class="login onb">${pasosBienvenida(S.bv.paso === 'listo' ? 4 : 2)}<div class="box">${cuerpo}</div></div>`;
-  clearInterval(S.bvPoll); if (S.bv.paso === 'espera') S.bvPoll = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 5000);
+  $('#app').innerHTML = `${flecha}<div class="login onb">${pasosBienvenida({ favorito: 1, instalar: 2, datos: 3, listo: 4 }[paso])}<div class="box">${cuerpo}</div></div>`;
+  if (paso === 'favorito' && !S.favHref) armarFavorito();
+  clearInterval(S.bvPoll); if (paso === 'datos' || paso === 'listo') S.bvPoll = setInterval(() => load(), 5000);
 }
 
 function tarjetaClaude() {
-  const ok = skillInstalada();
-  return `<div class="card"><div class="ch"><h2>Sincronizar con AppSheet</h2>${ok ? '<span class="tag ok">Skill instalada</span>' : '<span class="tag warn">Falta la skill</span>'}</div><div class="cb">
-    <p class="mute" style="margin-top:0">La app no se actualiza sola: trae lo que hay en AppSheet cuando tocás <b>Sincronizar</b>. Lo hace tu Claude con tu sesión (Claude de escritorio con el navegador integrado, o Claude in Chrome), solo leyendo.</p>
-    <ol class="steps"><li><b>Una sola vez:</b> <button class="btn sm${ok ? ' sec' : ''}" data-act="claudeinst">${ic('ia')}Instalar la skill en Claude</button> ${ok ? '' : '<button class="lnk small" data-act="claudeok">Ya la guardé</button>'}<div class="small mute">Se abre Claude con el pedido escrito: lo enviás y tocás <b>Guardar</b>. A mano: <button class="lnk small" data-act="claudezip">descargá el .zip</button> y subilo en Claude → Personalizar → Skills.</div></li>
-    <li><b>Al empezar el día y cada vez que quieras:</b> ${botonSync().replace('class="btn"', 'class="btn sm"')}<div class="small mute">Se abre Claude con el pedido escrito: tocá Enviar. Cuando termina, esta ventana se actualiza sola.</div></li></ol>
-    <p class="small mute" id="claudefb" style="display:none">¿No se abrió Claude? <a href="#" target="_blank" rel="noopener">Abrirlo en el navegador</a> (ahí necesitás Claude in Chrome para que pueda usar AppSheet).</p></div></div>`;
+  if (!S.favHref) setTimeout(armarFavorito, 0);
+  return `<div class="card"><div class="ch"><h2>Sincronizar con AppSheet</h2></div><div class="cb">
+    <p class="mute" style="margin-top:0">La app no se actualiza sola: trae lo que hay en AppSheet cuando tocás <b>Sincronizar</b>. Se abre AppSheet en tu navegador y ahí tocás el favorito, que lee todo dos veces (solo lee) y manda las lecturas para que la app las revise antes de guardarlas.</p>
+    <ol class="steps"><li><b>El botón en favoritos</b> (una vez por navegador): arrastralo a la barra de favoritos (Ctrl+Mayús+B si no la ves): ${botonFavorito()}</li>
+    <li><b>Datos de AppSheet</b>, al empezar el día y cuando quieras: ${botonSync().replace('class="btn"', 'class="btn sm"')}</li>
+    <li><b>Objetivos del mes</b>, una vez por mes: <button class="btn sm sec" data-act="abrirRep">Abrir el reporte</button> y tocá el mismo favorito.</li></ol>
+    <p class="small mute">El botón tiene una clave tuya: no lo compartas. <button class="lnk small" data-act="favnueva">Generar una clave nueva</button> (el botón anterior deja de funcionar).</p></div></div>`;
 }
 /** API para el Claude del usuario (la skill proyectos-eleven la usa desde esta pestaña). Todo con la sesión de quien está logueado. */
 window.PE = {
