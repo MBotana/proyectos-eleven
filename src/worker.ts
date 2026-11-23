@@ -108,7 +108,7 @@ async function userById(env: Env, id: string): Promise<User | null> {
   return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico', alcance: u.alcance || 'propio', edicion: u.edicion || 'completa' } : null;
 }
 export const conUsuario = (env: Env, U: User): Env => ({ ...env, U });
-const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: '', reporte_at: '' };
+const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: 'https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046', medios_at: '', conectado_at: '', as_url: '', reporte_at: '' };
 
 // ---------- acceso (una sola cuenta: contraseña) ----------
 const PBKDF2_IT = 100000;

@@ -925,7 +925,7 @@ document.addEventListener('click', async (ev) => {
     case 'bvext': S.bv = { paso: 'ext', desde: Date.now() - 5000 }; render(); break;
     case 'bvfav': S.bv = { ...S.bv, paso: 'fav' }; render(); break;
     case 'bvlistoED': S.bv = { ...S.bv, paso: 'listo' }; render(); break;
-    case 'bvirAS': window.postMessage({ pe: 'ext-leer-ya' }, location.origin); window.open(S.data.settings.as_url || 'https://www.appsheet.com/', '_blank'); break;
+    case 'bvirAS': window.postMessage({ pe: 'ext-leer-ya' }, location.origin); window.open(S.data.settings.as_url || 'https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046', '_blank'); break;
     case 'extahora': window.postMessage({ pe: 'ext-actualizar' }, location.origin); toast('Actualizando: se abren y cierran pestañas de fondo (1 a 3 minutos). La app se refresca sola.'); clearInterval(S.extPoll); { let n = 0; S.extPoll = setInterval(() => { load(); if (++n > 24) clearInterval(S.extPoll); }, 10000); } break;
     case 'bvlisto': S.bv = { ...S.bv, paso: 'listo' }; clearInterval(S.bvPoll); render(); break;
     case 'instalarapp': if (instalarEvt) { instalarEvt.prompt(); const r = await instalarEvt.userChoice; if (r.outcome === 'accepted') localStorage.setItem('pe_instalada', '1'); } break;
