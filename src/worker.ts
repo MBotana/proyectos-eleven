@@ -86,7 +86,7 @@ export async function ensureSchema(env: Env) {
   ready.add(env.DB);
 }
 /** Ajustes de cada usuario (se guardan como "<uid>:<clave>"); el resto es global. */
-const USER_KEYS = new Set(['cal_token', 'timer', 'avisos', 'aviso_hora', 'horas_hora', 'as_sync_at', 'dias_quieta', 'gemini_key', 'gemini_model_texto', 'gemini_model_imagen', 'gas_url', 'gas_secret', 'last_notification', 'import_key', 'conectar_tok', 'conectar_exp', 'conectado_at']);
+const USER_KEYS = new Set(['cal_token', 'timer', 'avisos', 'aviso_hora', 'horas_hora', 'as_sync_at', 'dias_quieta', 'gemini_key', 'gemini_model_texto', 'gemini_model_imagen', 'gas_url', 'gas_secret', 'last_notification', 'import_key', 'conectar_tok', 'conectar_exp', 'conectado_at', 'objetivos_at']);
 const skey = (env: Env, key: string) => (USER_KEYS.has(key) ? `${uidOf(env)}:${key}` : key);
 async function getS(env: Env, key: string): Promise<string | null> {
   const r = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(skey(env, key)).first();
@@ -108,7 +108,9 @@ async function userById(env: Env, id: string): Promise<User | null> {
   return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico' } : null;
 }
 export const conUsuario = (env: Env, U: User): Env => ({ ...env, U });
-const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: '' };
+/** martin.botana@x → Martin Botana (después se reemplaza por el nombre que figura en AppSheet). */
+const nombreDeMail = (email: string) => email.split('@')[0].split(/[._-]+/).filter(Boolean).map((x) => x[0].toUpperCase() + x.slice(1)).join(' ').slice(0, 80);
+const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: 'https://www.appsheet.com/start/476e1e19-c39a-4544-b72d-14f98b35c046', objetivos_at: '' };
 
 // ---------- acceso (una sola cuenta: contraseña) ----------
 const PBKDF2_IT = 100000;
@@ -240,6 +242,9 @@ export const asMoney = (s: unknown) => { const t = String(s ?? '').replace(/[^\d
  * red: [código, tema, país, idioma, subproyecto, variante, deadline, prioridad, estado, deadline estado, usuario, fecha entrega]
  */
 export async function importAS(env: Env, b: any) {
+  // el nombre de la persona sale de su sesión de AppSheet (tal como figura en las tareas)
+  const asNombre = str(b.as_nombre, 80);
+  if (env.U && asNombre && asNombre !== env.U.nombre) { await env.DB.prepare('UPDATE users SET nombre = ? WHERE id = ?').bind(asNombre, env.U.id).run(); env.U.nombre = asNombre; }
   const now = Date.now(), uid = uidOf(env), yo = yoOf(env);
   const codes = new Set(((await env.DB.prepare('SELECT code FROM projects WHERE uid = ?').bind(uid).all()).results as any[]).map(r => r.code));
   const out = { lb: 0, red: 0, saltadas: 0, proyectosNuevos: [] as string[] };
@@ -653,7 +658,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (path === '/api/setup' && m === 'POST') {
       if (await env.DB.prepare('SELECT 1 AS x FROM users LIMIT 1').first()) return fail('La cuenta ya está creada', 409);
       const b = await body(); if (typeof b.password !== 'string' || b.password.length < 8) return fail('La contraseña debe tener al menos 8 caracteres');
-      await env.DB.prepare("INSERT INTO users (id, nombre, email, pw, admin, created_at) VALUES ('u1', ?, ?, ?, 1, ?)").bind(str(b.nombre, 80) || YO, str(b.email, 120).toLowerCase(), await hashPw(b.password), Date.now()).run();
+      await env.DB.prepare("INSERT INTO users (id, nombre, email, pw, admin, created_at) VALUES ('u1', ?, ?, ?, 1, ?)").bind(str(b.nombre, 80) || nombreDeMail(str(b.email, 120).toLowerCase()) || YO, str(b.email, 120).toLowerCase(), await hashPw(b.password), Date.now()).run();
       await putS(conUsuario(env, { id: 'u1', nombre: '', email: '', admin: 1 }), 'cal_token', b64u(rand(24)));
       return json({ token: await newSession(env, 'u1') });
     }
@@ -662,8 +667,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const b = await body(), tok = str(b.invitacion, 80);
       const inv: any = await env.DB.prepare("SELECT * FROM invites WHERE token = ? AND used_by = ''").bind(tok).first();
       if (!inv) return fail('La invitación no existe o ya se usó. Pedile un link nuevo a quien te invitó.', 403);
-      const nombre = str(b.nombre, 80), email = str(b.email, 120).toLowerCase();
-      if (nombre.length < 3) return fail('Escribí tu nombre tal como aparece en AppSheet');
+      const email = str(b.email, 120).toLowerCase(), nombre = str(b.nombre, 80) || nombreDeMail(email);
+      if (nombre.length < 2) return fail('El mail no parece válido');
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('El mail no parece válido');
       if (typeof b.password !== 'string' || b.password.length < 8) return fail('La contraseña debe tener al menos 8 caracteres');
       if (await env.DB.prepare('SELECT 1 AS x FROM users WHERE lower(email) = ? OR lower(nombre) = lower(?)').bind(email, nombre).first()) return fail('Ya hay una cuenta con ese mail o ese nombre', 409);
@@ -718,6 +723,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
         const pr = JSON.parse(row.params || '{}');
         await env.DB.prepare('UPDATE projects SET params = ? WHERE uid = ? AND code = ?').bind(JSON.stringify({ ...pr, piezasMes: q, ...(row.tipo === 'LIN' ? { linksMes: q } : {}), objetivosAt: hoyEn(TZ) }), U.id, code).run(); n++;
       }
+      await putS(env, 'objetivos_at', String(Date.now()));
       return json({ ok: true, actualizados: n });
     }
     // modo predeterminado de cada usuario (Líder o Técnico): lo elige quien administra

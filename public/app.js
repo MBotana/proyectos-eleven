@@ -95,13 +95,13 @@ function render() {
 /** Selector de modo en la barra lateral (cada uno puede alternar; el predeterminado lo elige quien administra). */
 function renderModo() {
   const el = $('#sidetimer'); if (!el) return; const m = modoActual();
-  el.innerHTML = `<div class="lbl">Modo</div><div class="seg2"><button class="${m === 'tecnico' ? 'on' : ''}" data-act="modo" data-v="tecnico">Técnico</button><button class="${m === 'lider' ? 'on' : ''}" data-act="modo" data-v="lider">Líder</button></div>`;
+  el.innerHTML = '';
 }
 function renderLogin() {
   const alta = S.setup || S.invitacion;
-  const intro = S.invitacion === false ? 'Esta invitación ya se usó o no existe. Pedile un link nuevo a quien te invitó.' : S.invitacion ? 'Te invitaron a Proyectos Eleven. Creá tu cuenta: tu nombre tiene que ser igual al de AppSheet, así la app encuentra tus tareas.' : S.setup ? 'Primera vez: creá tu cuenta.' : 'Ingresá con tu mail (o tu nombre) y tu contraseña.';
-  $('#app').innerHTML = `<div class="login">${S.invitacion ? pasosBienvenida(enApp() || localStorage.getItem('pe_instalada') ? 1 : 0) : ''}${S.invitacion && !enApp() ? cajaInstalar() : ''}<form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${intro}</p>
-    ${S.invitacion === false ? '' : alta ? `<label>Nombre (igual que en AppSheet)<input name="nombre" required minlength="3" placeholder="Nombre Apellido" autofocus></label><label>Mail<input name="email" type="email" required autocomplete="email"></label>`
+  const intro = S.invitacion === false ? 'Esta invitación ya se usó o no existe. Pedile un link nuevo a quien te invitó.' : S.invitacion ? 'Te invitaron a Proyectos Eleven. Creá tu cuenta con tu mail de Eleven: tu nombre se toma de AppSheet.' : S.setup ? 'Primera vez: creá tu cuenta con tu mail de Eleven.' : 'Ingresá con tu mail (o tu nombre) y tu contraseña.';
+  $('#app').innerHTML = `<div class="login">${alta && S.invitacion !== false ? pasosBienvenida(0) : ''}${S.invitacion && !enApp() ? cajaInstalar() : ''}<form class="box" id="loginf"><img src="/icon.svg" alt=""><h1>Proyectos Eleven</h1><p>${intro}</p>
+    ${S.invitacion === false ? '' : alta ? `<label>Mail de Eleven<input name="email" type="email" required autocomplete="email" autofocus></label>`
       : `<label>Mail o nombre<input name="usuario" autocomplete="username" autofocus></label>`}
     ${S.invitacion === false ? '' : `<label>Contraseña<input type="password" name="pw" autocomplete="${alta ? 'new-password' : 'current-password'}" required minlength="8"></label>
     <button class="btn full" style="margin-top:14px">${alta ? 'Crear cuenta y entrar' : 'Entrar'}</button>`}<div class="err" id="lerr"></div></form></div>`;
@@ -431,7 +431,7 @@ async function actualizarTodo() {
 
 // ======================= Modo líder (solo lectura, por proyecto) =======================
 const VIEWS_LIDER = [['tablero', 'Tablero'], ['lproyectos', 'Proyectos'], ['lalertas', 'Para revisar'], ['sep'], ['ajustes', 'Ajustes']];
-const modoActual = () => (S.data?.me ? localStorage.getItem('pe_modo_' + S.data.me.id) || S.data.me.modo || 'tecnico' : 'tecnico');
+const modoActual = () => 'lider'; // esta versión es solo para líderes
 const SEM_TXT = { ok: 'Terminada', warn: 'Por vencer', bad: 'Vencida o con problema', '': 'En curso', off: 'Anulada' };
 const semDot = (c, t) => `<span class="sem sem-${c || 'run'}" title="${h(t || SEM_TXT[c])}"></span>`;
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -911,8 +911,8 @@ document.addEventListener('submit', async (ev) => {
   ev.preventDefault(); const f = ev.target;
   if (f.id === 'loginf') {
     try {
-      const r = S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
-        : S.setup ? await api('/api/setup', 'POST', { nombre: f.nombre.value, email: f.email.value, password: f.pw.value })
+      const r = S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, email: f.email.value, password: f.pw.value })
+        : S.setup ? await api('/api/setup', 'POST', { email: f.email.value, password: f.pw.value })
         : await api('/api/login', 'POST', { usuario: f.usuario.value, password: f.pw.value });
       S.token = r.token; localStorage.setItem('pe_token', r.token); localStorage.removeItem('pe_inv'); S.setup = false; S.invitacion = undefined; history.replaceState(null, '', '/'); $('#app').innerHTML = ''; await load();
     }
@@ -1011,7 +1011,7 @@ function cajaInstalar() {
     <button class="btn full" id="instbtn" data-act="instalarapp" ${instalarEvt ? '' : 'disabled'}>Instalar Proyectos Eleven</button><p class="small mute" style="margin:8px 0 0">Si el botón no se activa, abrí este link en Chrome o Edge. Si ya la instalaste, seguí con el paso 2.</p></div>`;
 }
 function pasosBienvenida(hechos) {
-  const n = ['Instalá la app', 'Creá tu cuenta', 'Conectá Claude', 'Tus tareas'];
+  const n = ['Creá tu cuenta', 'Conectá Claude', 'AppSheet', 'Reporte de Seguimiento', 'Tus proyectos'];
   return `<ol class="onb-pasos">${n.map((t, i) => `<li class="${i < hechos ? 'ok' : i === hechos ? 'on' : ''}"><span>${i < hechos ? '✓' : i + 1}</span>${t}</li>`).join('')}</ol>`;
 }
 const claveBienv = () => 'pe_bienv_' + (S.data?.me?.id || '');
@@ -1021,10 +1021,11 @@ function necesitaBienvenida() {
 }
 function renderBienvenida() {
   const st = S.data.settings, me = S.data.me; S.bv = S.bv || { paso: 'claude' };
-  if (S.bv.paso === 'espera' && st.as_sync_at && Number(st.as_sync_at) > S.bv.desde) S.bv.paso = 'listo';
+  const asOk = S.bv.desde && Number(st.as_sync_at) > S.bv.desde, repOk = S.bv.desde && Number(st.objetivos_at) > S.bv.desde;
+  if (S.bv.paso === 'espera' && asOk && repOk) S.bv.paso = 'listo';
   const nombre = h((me.nombre || '').split(' ')[0]);
   let cuerpo;
-  if (S.bv.paso === 'claude') cuerpo = `<h1>Hola, ${nombre}</h1><p>Ahora conectamos tu Claude. Él abre AppSheet con tu sesión y trae tus tareas; vos solo iniciás sesión cuando te lo pida.</p>
+  if (S.bv.paso === 'claude') cuerpo = `<h1>Hola, ${nombre}</h1><p>Ahora conectamos tu Claude (el de tu cuenta). Él abre AppSheet y el Reporte de Seguimiento con tu sesión y trae los datos de tus proyectos; vos solo iniciás sesión cuando te lo pida.</p>
       <div class="onb-ops"><button class="onb-op" data-act="bvclaude" data-via="escritorio"><i class="tag acc">Recomendado</i><b>Claude de escritorio</b><span>La app de Claude en tu computadora</span></button>
       <button class="onb-op" data-act="bvclaude" data-via="chrome"><b>Claude in Chrome</b><span>La extensión de Claude en tu Chrome</span></button></div>
       <p class="small mute">¿No tenés Claude? <a href="https://claude.ai/download" target="_blank" rel="noopener">Descargá Claude de escritorio</a>, iniciá sesión y volvé a esta ventana.</p>`;
@@ -1034,16 +1035,16 @@ function renderBienvenida() {
     cuerpo = `<h1>Seguí en Claude</h1><p>Se abrió Claude con el mensaje escrito. Esta ventana se actualiza sola.</p>
       <ul class="onb-check">${it(con, 'Enviá el mensaje', 'Tocá Enviar en Claude. Si te muestra la skill «proyectos-eleven», tocá Guardar.')}
       ${it(con, 'Claude abre tu app', con ? 'Listo: ya la tiene abierta con tu sesión.' : 'Esperando…')}
-      ${it(false, 'Iniciá sesión en AppSheet', 'Claude te abre AppSheet: entrá con tu cuenta de Eleven y avisale. Después te pide permiso para traer tus tareas y actualizarlas solo: aceptá.')}
-      ${it(false, 'Tus tareas llegan acá', '<span class="spin"></span> Esperando a Claude…')}</ul>
+      ${it(asOk, 'Iniciá sesión en AppSheet', asOk ? `Listo: ${S.data.projects.length} proyecto${S.data.projects.length === 1 ? '' : 's'} y sus tareas.` : 'Claude te abre AppSheet: entrá con tu cuenta de Eleven y avisale. Después te pide permiso para traer los datos y actualizarlos solo: aceptá.')}
+      ${it(repOk, 'Reporte de Seguimiento', repOk ? 'Listo: cantidad de tareas por proyecto para este mes.' : asOk ? '<span class="spin"></span> Claude está leyendo el Reporte (solo lectura). Si te pide elegir cuenta de Google, elegí la de Eleven.' : 'Después de AppSheet, Claude lee el Reporte (solo lectura).')}</ul>
       <p class="small mute">¿No se abrió Claude? <button class="lnk small" data-act="bvclaude" data-via="${S.bv.via}">Abrirlo de nuevo</button> · <button class="lnk small" data-act="bvclaude" data-via="${S.bv.via === 'chrome' ? 'escritorio' : 'chrome'}">Usar ${S.bv.via === 'chrome' ? 'Claude de escritorio' : 'Claude in Chrome'}</button> · <button class="lnk small" data-act="bvsaltar">Hacerlo sin Claude</button></p>`;
   } else {
     const nl = S.data.lb.length, nr = S.data.red.length;
-    cuerpo = `<h1>¡Listo, ${nombre}!</h1><p>Trajimos <b>${nl} link${nl === 1 ? '' : 's'}</b> y <b>${nr} redaccion${nr === 1 ? '' : 'es'}</b> de AppSheet${S.data.projects.length ? ` de ${S.data.projects.length} proyecto${S.data.projects.length === 1 ? '' : 's'}` : ''}. Si aceptaste la actualización automática, Claude las trae solo cada día hábil.</p>
+    cuerpo = `<h1>¡Listo, ${nombre}!</h1><p>Trajimos <b>${nl} link${nl === 1 ? '' : 's'}</b> y <b>${nr} redaccion${nr === 1 ? '' : 'es'}</b> de AppSheet y las cantidades del mes del Reporte${S.data.projects.length ? ` de ${S.data.projects.length} proyecto${S.data.projects.length === 1 ? '' : 's'}` : ''}. Si aceptaste la actualización automática, Claude las trae solo cada día hábil.</p>
       <p class="small mute">Cuando cambies algo en la app, tocá <b>Sincronizar</b> (en Ajustes o en Para AppSheet) y Claude lo pasa a AppSheet después de mostrarte la lista.</p>
       <button class="btn" data-act="bvfin">Entrar a la app</button>`;
   }
-  $('#app').innerHTML = `<div class="login onb">${pasosBienvenida(S.bv.paso === 'listo' ? 4 : 2)}<div class="box">${cuerpo}</div></div>`;
+  $('#app').innerHTML = `<div class="login onb">${pasosBienvenida(S.bv.paso === 'listo' ? 5 : S.bv.paso === 'claude' ? 1 : (S.bv.desde && Number(st.as_sync_at) > S.bv.desde) ? 3 : 2)}<div class="box">${cuerpo}</div></div>`;
   clearInterval(S.bvPoll); if (S.bv.paso === 'espera') S.bvPoll = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 5000);
 }
 
