@@ -5,6 +5,7 @@
 import { SCHEMA, MIGRATIONS, REBUILD } from './schema.ts';
 import { PROMPTS_INICIALES, PROMPTS_VERSION } from './prompts.ts';
 import { PROYECTOS_INICIALES, PLAN_INICIAL, SEED_VERSION, TIPOS_SERVICIO, ESTADOS_NEG, PRIORIDADES, MONEDAS, PUBLICADOS, TAREAS, YO, hoyEn, addDays, tipoHoras, QUIEN, DOC_EDITABLE_LB } from '../public/shared.js';
+import { ESQUEMA, PARTES, juntar, normalizar, compararLecturas, nombreEnAppSheet, diferencias, verificarGuardado, type Lote, type Parte } from './sync.ts';
 
 /** Usuario de la sesión (cada uno ve solo lo suyo). */
 export interface User { id: string; nombre: string; email: string; admin: number; modo?: string }
@@ -86,7 +87,7 @@ export async function ensureSchema(env: Env) {
   ready.add(env.DB);
 }
 /** Ajustes de cada usuario (se guardan como "<uid>:<clave>"); el resto es global. */
-const USER_KEYS = new Set(['cal_token', 'timer', 'avisos', 'aviso_hora', 'horas_hora', 'as_sync_at', 'dias_quieta', 'gemini_key', 'gemini_model_texto', 'gemini_model_imagen', 'gas_url', 'gas_secret', 'last_notification', 'import_key', 'conectar_tok', 'conectar_exp', 'conectado_at']);
+const USER_KEYS = new Set(['cal_token', 'timer', 'avisos', 'aviso_hora', 'horas_hora', 'as_sync_at', 'as_sync_info','dias_quieta', 'gemini_key', 'gemini_model_texto', 'gemini_model_imagen', 'gas_url', 'gas_secret', 'last_notification', 'import_key', 'conectar_tok', 'conectar_exp', 'conectado_at']);
 const skey = (env: Env, key: string) => (USER_KEYS.has(key) ? `${uidOf(env)}:${key}` : key);
 async function getS(env: Env, key: string): Promise<string | null> {
   const r = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(skey(env, key)).first();
@@ -105,12 +106,13 @@ async function userBySetting(env: Env, key: string, value: string): Promise<User
 }
 async function userById(env: Env, id: string): Promise<User | null> {
   const u: any = await env.DB.prepare('SELECT id, nombre, email, admin, modo FROM users WHERE id = ?').bind(id).first();
-  return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: u.modo || 'tecnico' } : null;
+  // esta versión es solo para líderes: el modo técnico está deshabilitado
+  return u ? { id: u.id, nombre: u.nombre, email: u.email, admin: Number(u.admin), modo: 'lider' } : null;
 }
 export const conUsuario = (env: Env, U: User): Env => ({ ...env, U });
 /** martin.botana@x → Martin Botana (después se reemplaza por el nombre que figura en AppSheet). */
 const nombreDeMail = (email: string) => email.split('@')[0].split(/[._-]+/).filter(Boolean).map((x) => x[0].toUpperCase() + x.slice(1)).join(' ').slice(0, 80);
-const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: '' };
+const PUBLIC_SETTINGS: Record<string, string> = { aviso_hora: '9', horas_hora: '18', avisos: '1', timer: '', as_sync_at: '', as_sync_info: '',dias_quieta: '14', gemini_model_texto: '', gemini_model_imagen: '', gas_url: '', medios_at: '', conectado_at: '', as_url: '' };
 
 // ---------- acceso (una sola cuenta: contraseña) ----------
 const PBKDF2_IT = 100000;
@@ -235,65 +237,128 @@ async function saveHours(env: Env, b: any) {
 export const asDate = (s: unknown) => { const m = String(s ?? '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : ''; };
 /** "$143,537.56" → 143537.56 */
 export const asMoney = (s: unknown) => { const t = String(s ?? '').replace(/[^\d.\-]/g, ''); return t ? Number(t) : null; };
-/**
- * Carga o actualiza tareas copiadas de AppSheet (id = código de AppSheet). Pisa solo lo que trae AppSheet;
- * los datos que existen solo acá (DR, tráfico, URL, contacto del medio, notas) se conservan. No genera pendientes para AppSheet.
- * lb:  [código, mes planificado, tipo, estado, anchor, medio, negociación, moneda, precio, fecha entrega, usuario, mail]
- * red: [código, tema, país, idioma, subproyecto, variante, deadline, prioridad, estado, deadline estado, usuario, fecha entrega]
- */
-export async function importAS(env: Env, b: any) {
-  // el nombre sale de la sesión de AppSheet, tal como figura en las tareas
-  const asNombre = str(b.as_nombre, 80);
-  if (env.U && asNombre && asNombre !== env.U.nombre) { await env.DB.prepare('UPDATE users SET nombre = ? WHERE id = ?').bind(asNombre, env.U.id).run(); env.U.nombre = asNombre; }
-  const now = Date.now(), uid = uidOf(env), yo = yoOf(env);
-  const codes = new Set(((await env.DB.prepare('SELECT code FROM projects WHERE uid = ?').bind(uid).all()).results as any[]).map(r => r.code));
-  const out = { lb: 0, red: 0, saltadas: 0, proyectosNuevos: [] as string[] };
-  // proyectos: los de "Tus Proyectos" en AppSheet y los que tengan alguna tarea asignada a esta persona
-  const proyDe = (code: string) => str(code, 40).toUpperCase().replace(/-\d+$/, '');
-  const quiero = new Set<string>([...(Array.isArray(b.proyectos) ? b.proyectos.map((c: unknown) => str(c, 40).toUpperCase()) : []),
-    ...(Array.isArray(b.lb) ? b.lb : []).filter((r: any) => str(r[10], 80) === yo).map((r: any) => proyDe(r[0])),
-    ...(Array.isArray(b.red) ? b.red : []).filter((r: any) => str(r[10], 80) === yo).map((r: any) => proyDe(r[0]))]);
-  let orden = codes.size;
-  for (const c of quiero) {
-    if (codes.has(c) || !/^[A-Z0-9]{2,5}-(LIN|RED)-[\d.]+$/.test(c)) continue;
-    const ref: any = await env.DB.prepare("SELECT * FROM projects WHERE code = ? ORDER BY uid = 'u1' DESC LIMIT 1").bind(c).first();
-    const cliente = ref?.cliente || str(b.clientes?.[c], 80) || c.split('-')[0];
-    await env.DB.prepare('INSERT INTO projects (uid, code, cliente, tipo, active, params, orden) VALUES (?, ?, ?, ?, 1, ?, ?)').bind(uid, c, cliente, c.includes('-LIN-') ? 'LIN' : 'RED', ref?.params || '{}', orden++).run();
-    if (ref) await env.DB.prepare('INSERT OR IGNORE INTO prompts (uid, project, clave, texto, updated_at) SELECT ?, project, clave, texto, ? FROM prompts WHERE uid = ? AND project = ?').bind(uid, now, ref.uid, c).run();
-    codes.add(c); out.proyectosNuevos.push(c);
+// ---------- sincronización con AppSheet (a pedido, en etapas, todo o nada) ----------
+const SYNC_TTL = 60 * 60000;
+const SYNC_ORIGENES = ['https://www.appsheet.com', 'https://datastudio.google.com', 'https://lookerstudio.google.com'];
+const httpErr = (msg: string, status: number, extra?: unknown) => Object.assign(new Error(msg), { status, extra });
+async function syncRun(env: Env, sid: string) {
+  const r: any = await env.DB.prepare('SELECT * FROM sync_runs WHERE sid = ? AND uid = ?').bind(str(sid, 40), uidOf(env)).first();
+  if (!r) throw httpErr('No existe esa sincronización: empezá una nueva con PE.syncIniciar().', 404);
+  return r;
+}
+/** Junta las lecturas recibidas, las valida, las compara entre sí y contra lo que ya hay. No escribe tareas. */
+export async function syncPreparar(env: Env, sid: string) {
+  const run = await syncRun(env, sid), uid = uidOf(env);
+  if (run.estado === 'aplicado') throw httpErr('Esta sincronización ya se aplicó. Para traer datos nuevos, empezá otra.', 409);
+  if (Date.now() - Number(run.created_at) > SYNC_TTL) throw httpErr('Esta sincronización venció (más de 1 hora). Empezá una nueva.', 409);
+  const lotes: Lote[] = ((await env.DB.prepare('SELECT data FROM sync_stage WHERE sid = ? ORDER BY parte, lectura, seq').bind(run.sid).all()).results as any[]).map((r) => JSON.parse(r.data));
+  const errores: string[] = [], advertencias: string[] = [], fotos: Partial<Record<Parte, Map<string, any>>> = {};
+  let meta: Record<string, unknown> = {};
+  for (const parte of PARTES) {
+    const esq = ESQUEMA[parte], lecs = juntar(lotes, parte, errores);
+    if (!lecs[1] && !lecs[2]) { if (esq.opcional) advertencias.push(`${esq.nombre}: no se leyó; los objetivos del mes quedan como estaban.`); else errores.push(`${esq.nombre}: no se leyó.`); continue; }
+    if (!lecs[1] || !lecs[2]) { errores.push(`${esq.nombre}: falta una de las dos lecturas.`); continue; }
+    meta = { ...meta, ...lecs[1].meta };
+    const antes = errores.length, a = normalizar(parte, lecs[1], errores, advertencias), b = normalizar(parte, lecs[2], errores, []);
+    if (errores.length > antes) continue;
+    if (!a.size) { errores.push(`${esq.nombre}: se leyó vacía. Dejá la pestaña a la vista hasta que cargue y volvé a sincronizar.`); continue; }
+    if (compararLecturas(parte, a, b, errores)) fotos[parte] = a;
   }
-  for (const r of Array.isArray(b.lb) ? b.lb : []) {
-    const code = str(r[0], 40).toUpperCase(), project = code.replace(/-\d+$/, '');
-    if (!codes.has(project)) { out.saltadas++; continue; }
-    const pub = asDate(r[9]), id = idTarea(env, code);
-    await env.DB.prepare(`INSERT INTO lb_tasks (id, project, as_code, estado, usuario, tipo_servicio, anchor, medio, estado_neg, moneda, precio, mail_eleven, deadline, publicado, created_at, updated_at, estado_at, uid)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET estado = excluded.estado, usuario = excluded.usuario, tipo_servicio = excluded.tipo_servicio, anchor = excluded.anchor, medio = excluded.medio,
-        estado_neg = excluded.estado_neg, moneda = excluded.moneda, precio = excluded.precio, mail_eleven = excluded.mail_eleven, deadline = excluded.deadline, publicado = excluded.publicado, updated_at = excluded.updated_at,
-        estado_at = CASE WHEN lb_tasks.estado = excluded.estado THEN COALESCE(lb_tasks.estado_at, excluded.estado_at) ELSE excluded.estado_at END`)
-      .bind(id, project, code, str(r[3], 80) || 'No Iniciado', str(r[10], 80), str(r[2], 60), str(r[4], 300), str(r[5], 200), str(r[6], 60), str(r[7], 8), asMoney(r[8]), str(r[11], 120).toLowerCase(), asDate(r[1]), pub, now, now, now, uid).run();
-    // opcionales: [12] estado del pago, [13] aviso que muestra AppSheet, [14] URL de la publicación, [15] DR, [16] tráfico, [17] URL del cliente, [18] link del documento
-    if (r.length > 12) await env.DB.prepare(`UPDATE lb_tasks SET pago_estado = ?, as_aviso = ?, url_publicacion = CASE WHEN ? != '' THEN ? ELSE url_publicacion END, dr = COALESCE(?, dr), trafico = COALESCE(?, trafico),
-        url_cliente = CASE WHEN ? != '' THEN ? ELSE url_cliente END, doc_url = CASE WHEN ? != '' THEN ? ELSE doc_url END WHERE id = ?`)
-      .bind(str(r[12], 60), str(r[13], 500), str(r[14], 500), str(r[14], 500), numOrNull(r[15]), numOrNull(r[16]), str(r[17], 500), str(r[17], 500), str(r[18], 500), str(r[18], 500), id).run();
-    out.lb++;
+  const adv = [...new Set(advertencias)];
+  const base = { sid: run.sid, ok: false, errores, advertencias: adv.slice(0, 40), requiereConfirmacion: false, motivosConfirmacion: [] as string[] };
+  if (errores.length || !fotos.lb || !fotos.red || !fotos.lbProy) return { informe: base };
+  // quién es: el nombre con el que figura en AppSheet (sale del mail de la sesión de AppSheet)
+  const lbAll = [...fotos.lb.values()], redAll = [...fotos.red.values()];
+  const nombres = [...new Set([...lbAll, ...redAll].map((r) => r.usuario).filter(Boolean))];
+  const yo = nombreEnAppSheet(str(meta.as_email, 120), nombres) || (env.U && nombres.includes(env.U.nombre) ? env.U.nombre : '');
+  if (!yo) adv.push('No encontré tu nombre entre los asignados de AppSheet: se toman solo los proyectos de tu tablero de AppSheet.');
+  // tus proyectos: los del tablero de Gestión Link Building y los que tengan alguna tarea asignada a vos
+  const quiero = new Set<string>([...fotos.lbProy.keys()]);
+  for (const r of [...lbAll, ...redAll]) if (yo && r.usuario === yo) quiero.add(r.project);
+  const fotoLb = lbAll.filter((r) => quiero.has(r.project)), fotoRed = redAll.filter((r) => quiero.has(r.project));
+  const q = async (sql: string) => (await env.DB.prepare(sql).bind(uid).all()).results as any[];
+  const [actLb, actRed, actProy] = [await q('SELECT * FROM lb_tasks WHERE uid = ? AND prueba = 0'), await q('SELECT * FROM redacciones WHERE uid = ? AND prueba = 0'), await q('SELECT code, active, params FROM projects WHERE uid = ?')];
+  const dLb = diferencias('lb', actLb, fotoLb), dRed = diferencias('red', actRed, fotoRed);
+  const codsAct = new Set(actProy.map((p) => p.code)), nuevos = [...quiero].filter((c) => !codsAct.has(c)).sort();
+  const desactivados = actProy.filter((p) => p.active && !quiero.has(p.code)).map((p) => p.code).sort();
+  // objetivos del mes (reporte de seguimiento)
+  const obj: Record<string, number | null> = {}, sinObjetivo: string[] = [];
+  for (const [parte, tipo] of [['objLin', 'LIN'], ['objRed', 'RED']] as const) {
+    const m = fotos[parte]; if (!m) continue;
+    for (const c of [...quiero].filter((x) => x.includes(`-${tipo}-`))) { if (m.has(c)) obj[c] = m.get(c).piezasMes; else sinObjetivo.push(c); }
   }
-  for (const r of Array.isArray(b.red) ? b.red : []) {
-    const code = str(r[0], 40).toUpperCase(), project = code.replace(/-\d+$/, '');
-    if (!codes.has(project)) { out.saltadas++; continue; }
-    const id = idTarea(env, code);
-    await env.DB.prepare(`INSERT INTO redacciones (id, project, as_code, tema, pais, idioma, subproyecto, variante, fecha_entrega, prioridad, estado, deadline_estado, usuario, entregada, ia, created_at, updated_at, estado_at, uid)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET tema = excluded.tema, pais = excluded.pais, idioma = excluded.idioma, subproyecto = excluded.subproyecto, variante = excluded.variante, fecha_entrega = excluded.fecha_entrega,
-        prioridad = excluded.prioridad, estado = excluded.estado, deadline_estado = excluded.deadline_estado, usuario = excluded.usuario, entregada = excluded.entregada, updated_at = excluded.updated_at,
-        estado_at = CASE WHEN redacciones.estado = excluded.estado THEN COALESCE(redacciones.estado_at, excluded.estado_at) ELSE excluded.estado_at END`)
-      .bind(id, project, code, str(r[1], 300), str(r[2], 60), str(r[3], 40), str(r[4], 120), str(r[5], 120), asDate(r[6]), str(r[7], 30) || 'Normal', str(r[8], 80), asDate(r[9]), str(r[10], 80), asDate(r[11]), now, now, now, uid).run();
-    // opcionales: [12] aviso de AppSheet, [13] link del documento
-    if (r.length > 12) await env.DB.prepare(`UPDATE redacciones SET as_aviso = ?, doc_url = CASE WHEN ? != '' THEN ? ELSE doc_url END WHERE id = ?`).bind(str(r[12], 500), str(r[13], 500), str(r[13], 500), id).run();
-    out.red++;
+  if (sinObjetivo.length) adv.push(`Sin objetivo en el reporte de seguimiento: ${sinObjetivo.join(', ')} (la app los muestra como «sin objetivo»).`);
+  // lo que pide confirmación antes de aplicar
+  const motivos: string[] = [];
+  const crit = [...dLb.vaciados, ...dRed.vaciados].filter((v) => v.critico);
+  if (crit.length) motivos.push(`${crit.length} dato${crit.length > 1 ? 's' : ''} clave quedaría${crit.length > 1 ? 'n' : ''} vacío${crit.length > 1 ? 's' : ''} (${crit.slice(0, 5).map((v) => `${v.code}: ${v.campo}`).join(', ')}).`);
+  for (const [k, d, act] of [['links', dLb, actLb.length], ['redacciones', dRed, actRed.length]] as const)
+    if (d.borradas.length > Math.max(5, act * 0.1)) motivos.push(`${d.borradas.length} ${k} ya no están en AppSheet y se borrarían de la app (${d.borradas.slice(0, 5).join(', ')}…).`);
+  const conTareas = new Set([...actLb, ...actRed].map((x) => x.project)), ocultosConTareas = desactivados.filter((c) => conTareas.has(c));
+  if (ocultosConTareas.length) motivos.push(`Estos proyectos ya no son tuyos en AppSheet y se ocultarían con sus tareas: ${ocultosConTareas.join(', ')}.`);
+  const resumen = (d: ReturnType<typeof diferencias>, n: number) => ({ total: n, nuevas: d.nuevas, cambiadas: d.cambiadas, iguales: d.iguales, borradas: d.borradas.length });
+  const informe = { ...base, ok: true, advertencias: [...new Set(adv)].slice(0, 40), yo, requiereConfirmacion: motivos.length > 0, motivosConfirmacion: motivos,
+    leidas: { links: lbAll.length, redacciones: redAll.length, proyectosTablero: fotos.lbProy.size },
+    proyectos: { tuyos: [...quiero].sort(), nuevos, ocultos: desactivados },
+    links: resumen(dLb, fotoLb.length), redacciones: resumen(dRed, fotoRed.length),
+    objetivos: { leidos: !!(fotos.objLin || fotos.objRed), actualizados: Object.keys(obj).length, sinObjetivo },
+    borradas: [...dLb.borradas, ...dRed.borradas].slice(0, 30), vaciados: [...dLb.vaciados, ...dRed.vaciados].slice(0, 30) };
+  await env.DB.prepare('UPDATE sync_runs SET estado = ?, informe = ? WHERE sid = ?').bind('revisado', JSON.stringify(informe), run.sid).run();
+  return { informe, fotoLb, fotoRed, quiero, fotos, obj, actProy, yo };
+}
+
+/** Aplica la foto revisada de una sola vez (lote atómico) y después compara lo guardado con lo leído. */
+export async function syncAplicar(env: Env, sid: string, confirmar = false) {
+  const p = await syncPreparar(env, sid), inf: any = p.informe;
+  if (!inf.ok) throw httpErr('La lectura tiene errores: no se aplicó nada.', 409, inf);
+  if (inf.requiereConfirmacion && !confirmar) throw httpErr('Hay cambios que necesitan tu confirmación: no se aplicó nada.', 409, inf);
+  const { fotoLb, fotoRed, quiero, fotos, obj, actProy, yo } = p as Required<typeof p>;
+  const uid = uidOf(env), now = Date.now(), hoy = hoyEn(TZ), st: any[] = [], P = (sql: string, ...a: unknown[]) => st.push(env.DB.prepare(sql).bind(...a));
+  // proyectos
+  const prev = new Map(actProy.map((x: any) => [x.code, JSON.parse(x.params || '{}')]));
+  const clientes = new Map([...fotos.lbProy!.values()].map((x: any) => [x.code.split('-')[0], x.cliente]));
+  let orden = actProy.length;
+  for (const code of [...quiero].sort()) {
+    const tablero = fotos.lbProy!.get(code), tipo = code.includes('-LIN-') ? 'LIN' : 'RED';
+    const params: any = { ...(prev.get(code) || {}) };
+    if (tablero) Object.assign(params, { presupuestoMensual: tablero.presupuesto, monedaPresupuesto: tablero.moneda, estadoAS: tablero.estado, inicio: tablero.inicio, cierre: tablero.cierre });
+    if (fotos[tipo === 'LIN' ? 'objLin' : 'objRed']) { const v = code in obj ? obj[code] : null; Object.assign(params, { piezasMes: v, objetivosAt: hoy }, tipo === 'LIN' ? { linksMes: v } : {}); }
+    const cliente = tablero?.cliente || clientes.get(code.split('-')[0]) || code.split('-')[0];
+    if (prev.has(code)) P('UPDATE projects SET cliente = ?, active = 1, params = ? WHERE uid = ? AND code = ?', cliente, JSON.stringify(params), uid, code);
+    else P('INSERT INTO projects (uid, code, cliente, tipo, active, params, orden) VALUES (?, ?, ?, ?, 1, ?, ?)', uid, code, cliente, tipo, JSON.stringify(params), orden++);
   }
-  await putS(env, 'as_sync_at', String(now));
-  return out;
+  P('UPDATE projects SET active = 0 WHERE uid = ? AND code NOT IN (SELECT value FROM json_each(?))', uid, JSON.stringify([...quiero]));
+  // links: foto completa (alta, cambio y baja de lo que ya no está en AppSheet)
+  const j = (o: string) => `json_extract(value, '$.${o}')`;
+  const lbCols = ['id', 'project', 'as_code', 'estado', 'usuario', 'tipo_servicio', 'anchor', 'medio', 'estado_neg', 'moneda', 'precio', 'mail_eleven', 'deadline', 'publicado'];
+  const lbUpd = lbCols.filter((c) => !['id', 'project', 'as_code'].includes(c));
+  P(`INSERT INTO lb_tasks (${lbCols.join(', ')}, created_at, updated_at, estado_at, uid) SELECT ${lbCols.map(j).join(', ')}, ?, ?, ?, ? FROM json_each(?) WHERE true
+     ON CONFLICT(id) DO UPDATE SET ${lbUpd.map((c) => `${c} = excluded.${c}`).join(', ')}, updated_at = excluded.updated_at,
+     estado_at = CASE WHEN lb_tasks.estado = excluded.estado THEN COALESCE(lb_tasks.estado_at, excluded.estado_at) ELSE excluded.estado_at END`,
+  now, now, now, uid, JSON.stringify(fotoLb.map((r: any) => ({ ...r, id: idTarea(env, r.as_code) }))));
+  P("DELETE FROM lb_tasks WHERE uid = ? AND prueba = 0 AND as_code != '' AND as_code NOT IN (SELECT value FROM json_each(?))", uid, JSON.stringify(fotoLb.map((r: any) => r.as_code)));
+  // redacciones
+  const redCols = ['id', 'project', 'as_code', 'tema', 'pais', 'idioma', 'subproyecto', 'variante', 'fecha_entrega', 'prioridad', 'estado', 'deadline_estado', 'usuario', 'entregada'];
+  const redUpd = redCols.filter((c) => !['id', 'project', 'as_code'].includes(c));
+  P(`INSERT INTO redacciones (${redCols.join(', ')}, ia, created_at, updated_at, estado_at, uid) SELECT ${redCols.map(j).join(', ')}, 0, ?, ?, ?, ? FROM json_each(?) WHERE true
+     ON CONFLICT(id) DO UPDATE SET ${redUpd.map((c) => `${c} = excluded.${c}`).join(', ')}, updated_at = excluded.updated_at,
+     estado_at = CASE WHEN redacciones.estado = excluded.estado THEN COALESCE(redacciones.estado_at, excluded.estado_at) ELSE excluded.estado_at END`,
+  now, now, now, uid, JSON.stringify(fotoRed.map((r: any) => ({ ...r, id: idTarea(env, r.as_code) }))));
+  P("DELETE FROM redacciones WHERE uid = ? AND prueba = 0 AND as_code != '' AND as_code NOT IN (SELECT value FROM json_each(?))", uid, JSON.stringify(fotoRed.map((r: any) => r.as_code)));
+  // nombre, fecha de la sincronización y cierre
+  if (yo && env.U && yo !== env.U.nombre) { P('UPDATE users SET nombre = ? WHERE id = ?', yo, uid); env.U.nombre = yo; }
+  const info = { at: now, links: fotoLb.length, redacciones: fotoRed.length, proyectos: quiero.size, objetivos: inf.objetivos.leidos ? hoy : '' };
+  const set = (k: string, v: string) => P('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', `${uid}:${k}`, v);
+  set('as_sync_at', String(now)); set('as_sync_info', JSON.stringify(info));
+  P("UPDATE sync_runs SET estado = 'aplicado' WHERE sid = ?", sid);
+  P('DELETE FROM sync_stage WHERE sid = ?', sid);
+  if (env.DB.batch) await env.DB.batch(st); else for (const s of st) await s.run();
+  // verificación: lo guardado tiene que ser exactamente lo leído
+  const q = async (sql: string) => (await env.DB.prepare(sql).bind(uid).all()).results as any[];
+  const dif = [...verificarGuardado('lb', await q("SELECT * FROM lb_tasks WHERE uid = ? AND prueba = 0 AND as_code != ''"), fotoLb), ...verificarGuardado('red', await q("SELECT * FROM redacciones WHERE uid = ? AND prueba = 0 AND as_code != ''"), fotoRed)];
+  const verificacion = { ok: dif.length === 0, diferencias: dif };
+  await putS(env, 'as_sync_info', JSON.stringify({ ...info, verificado: verificacion.ok }));
+  return { ...inf, aplicado: true, verificacion };
 }
 
 // ---------- calendario (.ics) ----------
@@ -632,16 +697,23 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       if (!U) return new Response('Not found', { status: 404 });
       return new Response(await buildICS(conUsuario(env, U), url.origin), { headers: { 'content-type': 'text/calendar; charset=utf-8', 'cache-control': 'no-store' } });
     }
-    // importación desde la página de AppSheet (botón "Traer de AppSheet": clave propia de cada usuario)
-    if (path === '/api/import') {
-      const cors = { 'access-control-allow-origin': 'https://www.appsheet.com', 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-import-key', 'access-control-max-age': '600' };
+    // sincronización: AppSheet y el reporte mandan sus lecturas acá (clave de un solo uso de esa sincronización, o la sesión de la app)
+    if (path === '/api/sync/lote') {
+      const og = req.headers.get('origin') || '', cors: Record<string, string> = SYNC_ORIGENES.includes(og) ? { 'access-control-allow-origin': og, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-sync-key, authorization', 'access-control-max-age': '600', vary: 'origin' } : {};
+      const resp = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...cors, 'content-type': 'application/json' } });
       if (m === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-      const U = m === 'POST' ? await userBySetting(env, 'import_key', req.headers.get('x-import-key') ?? '') : null;
-      if (!U) return new Response(JSON.stringify({ error: 'No autorizado: volvé a copiar el botón desde Ajustes de la app' }), { status: 401, headers: { ...cors, 'content-type': 'application/json' } });
-      const cuerpo = await body(), link = linkAppSheet(cuerpo.as_url);
-      if (link) await putS(env, 'as_url', link);
-      const r = await importAS(conUsuario(env, U), cuerpo);
-      return new Response(JSON.stringify(r), { headers: { ...cors, 'content-type': 'application/json' } });
+      if (m !== 'POST') return resp({ error: 'Método no permitido' }, 405);
+      const b = await body(), run: any = await env.DB.prepare('SELECT * FROM sync_runs WHERE sid = ?').bind(str(b.sid, 40)).first();
+      const ses = run && !req.headers.get('x-sync-key') ? await authed(req, env) : null;
+      if (!run || !(sameStr(req.headers.get('x-sync-key') ?? '', run.clave) || ses?.id === run.uid)) return resp({ error: 'No autorizado: empezá una sincronización nueva desde la app.' }, 401);
+      if (run.estado === 'aplicado' || Date.now() - Number(run.created_at) > SYNC_TTL) return resp({ error: 'Esta sincronización ya terminó o venció: empezá una nueva.' }, 409);
+      const parte = b.parte as Parte, lectura = Number(b.lectura), seq = Number(b.seq);
+      if (!PARTES.includes(parte) || ![1, 2].includes(lectura) || !Number.isInteger(seq) || seq < 0 || seq > 400 || !Array.isArray(b.encabezado) || b.encabezado.length > 80 || !Array.isArray(b.filas) || b.filas.length > 600)
+        return resp({ error: 'Lote inválido' }, 400);
+      const lote: Lote = { parte, lectura, seq, ultimo: !!b.ultimo, encabezado: b.encabezado.map((x: unknown) => str(x, 120)), filas: b.filas.map((f: any) => ({ ...(f && f.g !== undefined ? { g: str(f.g, 60) } : {}), c: Array.isArray(f?.c) ? f.c.slice(0, 80).map((x: unknown) => str(x, 600)) : null })), meta: b.meta && typeof b.meta === 'object' ? { as_email: str(b.meta.as_email, 120) } : undefined };
+      if (seq === 0) await env.DB.prepare('DELETE FROM sync_stage WHERE sid = ? AND parte = ? AND lectura = ?').bind(run.sid, parte, lectura).run();
+      await env.DB.prepare('INSERT OR REPLACE INTO sync_stage (sid, parte, lectura, seq, data) VALUES (?, ?, ?, ?, ?)').bind(run.sid, parte, lectura, seq, JSON.stringify(lote)).run();
+      return resp({ ok: true, recibidas: lote.filas.length });
     }
     // compilado de medios desde la planilla de Google (la abro yo en el navegador con tu sesión de Eleven)
     if (path === '/api/medios/import-key') {
@@ -713,25 +785,16 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const tok = b64u(rand(24)); await putS(env, 'conectar_tok', tok); await putS(env, 'conectar_exp', String(Date.now() + 60 * 60000));
       return json({ token: tok, link: `${url.origin}/?conectar=${tok}`, as_url: (await getS(env, 'as_url')) || '' });
     }
-    // objetivos mensuales por proyecto (los lee Claude del reporte de seguimiento, solo lectura)
-    if (path === '/api/objetivos' && m === 'POST') {
-      const b = await body(); if (!Array.isArray(b.items)) return fail('Faltan los objetivos');
-      let n = 0;
-      for (const it of b.items.slice(0, 200)) {
-        const code = str(it.code, 40), q = numOrNull(it.piezasMes); if (q === null) continue;
-        const row: any = await env.DB.prepare('SELECT tipo, params FROM projects WHERE uid = ? AND code = ?').bind(U.id, code).first(); if (!row) continue;
-        const pr = JSON.parse(row.params || '{}');
-        await env.DB.prepare('UPDATE projects SET params = ? WHERE uid = ? AND code = ?').bind(JSON.stringify({ ...pr, piezasMes: q, ...(row.tipo === 'LIN' ? { linksMes: q } : {}), objetivosAt: hoyEn(TZ) }), U.id, code).run(); n++;
-      }
-      return json({ ok: true, actualizados: n });
+    // sincronización a pedido: iniciar → (AppSheet y reporte mandan sus lecturas) → revisar → aplicar
+    if (path === '/api/sync/iniciar' && m === 'POST') {
+      await env.DB.prepare("DELETE FROM sync_stage WHERE sid IN (SELECT sid FROM sync_runs WHERE created_at < ?)").bind(Date.now() - 864e5).run();
+      await env.DB.prepare('DELETE FROM sync_runs WHERE created_at < ?').bind(Date.now() - 7 * 864e5).run();
+      const sid = newId(), clave = b64u(rand(24));
+      await env.DB.prepare('INSERT INTO sync_runs (sid, uid, clave, created_at) VALUES (?, ?, ?, ?)').bind(sid, U.id, clave, Date.now()).run();
+      return json({ sid, clave, origen: url.origin, vence: Date.now() + SYNC_TTL });
     }
-    // modo predeterminado de cada usuario (Líder o Técnico): lo elige quien administra
-    if (path === '/api/usuarios/modo' && m === 'POST') {
-      if (!U.admin) return fail('Solo quien administra la app puede cambiarlo', 403);
-      const b = await body();
-      await env.DB.prepare('UPDATE users SET modo = ? WHERE id = ?').bind(oneOf(b.modo, ['lider', 'tecnico'], 'tecnico'), str(b.id, 40)).run();
-      return json({ ok: true });
-    }
+    if (path === '/api/sync/revisar' && m === 'POST') return json((await syncPreparar(env, str((await body()).sid, 40))).informe);
+    if (path === '/api/sync/aplicar' && m === 'POST') { const b = await body(); return json(await syncAplicar(env, str(b.sid, 40), b.confirmar === true)); }
     if (path === '/api/import-key' && m === 'GET') {
       let k = await getS(env, 'import_key'); if (!k || url.searchParams.get('nueva')) { k = b64u(rand(24)); await putS(env, 'import_key', k); }
       return json({ key: k, origin: url.origin });
@@ -871,7 +934,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (path === '/api/export' && m === 'GET') return json(await allData(env));
     return fail('No encontrado', 404);
   } catch (e: any) {
-    return fail(e?.message ?? 'Error', e?.status ?? 500);
+    return json({ error: e?.message ?? 'Error', ...(e?.extra ? { informe: e.extra } : {}) }, e?.status ?? 500);
   }
 }
 

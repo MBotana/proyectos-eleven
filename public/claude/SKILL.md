@@ -1,99 +1,202 @@
 ---
 name: proyectos-eleven
-description: Conecta y sincroniza la app Proyectos Eleven con AppSheet (Eleven - Operaciones). Hace la configuración de la primera vez, trae las tareas de AppSheet a la app, pasa a AppSheet los cambios pendientes y lee los objetivos del reporte de seguimiento. Usar cuando el usuario pida conectar, sincronizar, actualizar, traer de AppSheet o pasar cambios a AppSheet desde Proyectos Eleven.
+description: Sincroniza a pedido la app Proyectos Eleven (versión líder, solo lectura) con AppSheet (Eleven - Operaciones) y el reporte de seguimiento. Lee dos veces cada tabla, valida todo y aplica una foto completa solo si no hay errores. Usar cuando el usuario pida conectar, sincronizar, actualizar o traer datos de AppSheet a Proyectos Eleven.
 ---
 
-# Proyectos Eleven ↔ AppSheet
+# Proyectos Eleven ← AppSheet (versión líder)
 
-- **APP**: https://proyectos-eleven.martinbotana.workers.dev (la app del usuario).
+- **APP**: https://proyectos-eleven.martinbotana.workers.dev
 - **AppSheet**: la app "Eleven - Operaciones" (www.appsheet.com). El mensaje del usuario suele traer el link.
-- **Reporte**: https://datastudio.google.com/u/0/reporting/21888fb7-9f40-4059-98ea-e9a1c198eb08/page/73rOF (solo lectura).
+- **Reporte**: https://datastudio.google.com/u/0/reporting/21888fb7-9f40-4059-98ea-e9a1c198eb08/page/73rOF
 
-Todo se hace en el navegador, con **las sesiones del usuario**: el navegador integrado de Claude de escritorio o Claude in Chrome. Trabajás como si fuera el usuario haciéndolo a mano.
+Todo se hace en el navegador con **las sesiones del usuario** (el navegador integrado de Claude de escritorio o Claude in Chrome).
 
 ## Reglas (no se negocian)
 
-- Nunca pidas, escribas ni guardes contraseñas o códigos. Si una página pide iniciar sesión, pedile al usuario que lo haga él en esa ventana y esperá a que te avise.
-- **AppSheet**: solo cambiás lo que está en la lista de pendientes de la app, después del OK del usuario. Nada más.
-- **Planillas y documentos de Google**: no escribas en ninguna. La única excepción es el documento de redacción de una tarea, y solo cuando el usuario pidió esa redacción.
-- **Reporte de seguimiento**: solo se mira. No edites, no cambies filtros guardados, no compartas.
-- **Nunca dejes comentarios** en ningún lado (Docs, Sheets, AppSheet, reporte).
-- Solo las tareas del usuario que te lo pidió. No cambies ajustes de AppSheet ni de la app.
-- Nunca marques como hecho algo que no verificaste.
+- **Solo lectura.** No cambies nada en AppSheet, en el reporte ni en ninguna planilla o documento. No dejes comentarios en ningún lado.
+- Nunca pidas, escribas ni guardes contraseñas o códigos. Si una página pide iniciar sesión, pedile al usuario que lo haga él y esperá su aviso.
+- **No insertes scripts externos** (`<script src>`), no crees políticas de Trusted Types y no copies datos a mano: solo ejecutás los códigos de lectura de esta skill tal cual, y ellos mandan los datos directo a la app.
+- **Nunca digas "listo" sin que `PE.syncAplicar` devuelva `verificacion.ok === true`.** Si algo falla, no se escribe nada: contale al usuario el error tal como vino y que vuelva a tocar **Sincronizar**.
+- La sincronización es **solo a pedido**: no crees tareas programadas ni automáticas.
 
-## 0. Preparar (siempre)
+## 0. Preparar
 
-1. Abrí APP en una pestaña.
-   - Si el mensaje trae un "enlace para abrir mi app", abrí **ese** enlace (deja la app con la sesión del usuario en este navegador).
-   - Con la herramienta de JavaScript ejecutá `await PE.yo()`. Si `PE` no existe, recargá una vez. Si responde `null` y no tenés enlace, pedile que toque **Sincronizar** en la app para que te mande uno nuevo.
-2. Guardá `const inicio = Date.now()` para registrar tu tiempo.
-3. Abrí AppSheet en otra pestaña (el link del mensaje). Si pide iniciar sesión, pedile al usuario que entre con su cuenta de Eleven y esperá su aviso.
+1. Abrí APP en una pestaña. Si el mensaje trae un "enlace para abrir mi app", abrí **ese** enlace.
+2. Con la herramienta de JavaScript, en APP: `await PE.yo()`. Si `PE` no existe, recargá una vez. Si responde `null`, pedile que toque **Sincronizar** en la app para mandarte un enlace nuevo.
+3. Guardá la hora de inicio: `window.__inicio = Date.now()`.
+4. Abrí AppSheet en otra pestaña (el link del mensaje). Si pide iniciar sesión, pedile que entre con su cuenta de Eleven y esperá su aviso.
 
 ## Primera vez (cuando el mensaje lo pide)
 
 1. Si todavía no tiene esta skill guardada, proponésela para guardar (mismo nombre y contenido que este archivo) y seguí.
-2. Hacé **0. Preparar**. En AppSheet, apenas esté adentro, decile en un mensaje corto y pedí permiso **una sola vez**:
-   > "Ya estás en AppSheet. ¿Te traigo ahora tus tareas a Proyectos Eleven y las actualizo automáticamente cada día hábil? Solo leo AppSheet; nunca cambio nada sin mostrarte antes la lista."
-3. Si acepta:
-   - Hacé **1. Traer de AppSheet**.
-   - Hacé **3. Objetivos del mes**.
-   - Si tenés una herramienta para crear tareas programadas, creá una que corra los días hábiles a la mañana, que necesite esta computadora, con el pedido: "Usá la skill proyectos-eleven: traé mis tareas de AppSheet (solo lectura) y actualizá los objetivos del mes." Si no la tenés, decile que use el botón **Sincronizar** de la app.
-4. Si no acepta, no traigas nada: decile que puede hacerlo cuando quiera con **Sincronizar**.
-5. Cerrá con un mensaje corto: qué se trajo y que ya puede volver a la ventana de Proyectos Eleven (se actualiza sola).
+2. Hacé **Sincronizar** completo. No preguntes nada más: el usuario ya lo pidió.
 
-## 1. Traer de AppSheet (solo lectura)
+## Sincronizar
 
-1. En la pestaña de APP: `await PE.traer()` devuelve `{ clave, origen }`.
-2. **Poné la pestaña de AppSheet al frente** (que sea la pestaña activa y visible: AppSheet no dibuja las tablas en una pestaña de fondo) y, con la app abierta, ejecutá (reemplazando CLAVE y ORIGEN):
+### 1. Iniciar (pestaña APP)
 
-   ```js
-   const url = ORIGEN + '/traer.js?v=' + Date.now();
-   const el = document.createElement('script');
-   el.src = window.trustedTypes ? trustedTypes.createPolicy('pe' + Date.now(), { createScriptURL: (u) => u }).createScriptURL(url) : url;
-   await new Promise((ok, ko) => { el.onload = ok; el.onerror = () => ko(new Error('no cargó traer.js')); document.head.appendChild(el); });
-   window.__peEstado = 'iniciando';
-   traerDeAppSheet(CLAVE, ORIGEN);
-   'iniciado'
-   ```
+```js
+window.__s = await PE.syncIniciar(); window.__s
+```
+Devuelve `{ sid, clave, origen }`. Vence en 1 hora.
 
-   No esperes el resultado: tarda entre 1 y 3 minutos. Consultá `window.__peEstado` cada 15 segundos hasta que empiece con "listo" o con "no se pudo". No toques la pestaña mientras tanto.
-   - Mientras lee, la pestaña de AppSheet tiene que seguir **al frente**: no cambies de pestaña ni la minimices.
-   - Si termina en "no se pudo… no cargó" o "…se leyó vacía", traé la pestaña de AppSheet al frente y repetí este paso **una vez**. Si vuelve a fallar, avisale al usuario con ese texto y no sigas.
-   - El resumen final tiene que decir cuántos links **y** cuántas redacciones llegaron; si alguno es 0, no lo des por bueno.
-   - Si el script no carga por políticas de la página, pedí en APP `await PE.codigoTraer()` y ejecutá ese texto tal cual en la pestaña de AppSheet.
-3. En APP: `await PE.actualizar()`.
+### 2. Leer AppSheet (pestaña AppSheet)
 
-## 2. Pasar cambios a AppSheet (escritura)
+**Poné la pestaña de AppSheet al frente** (AppSheet no dibuja las tablas en una pestaña de fondo) y ejecutá este código **tal cual**, reemplazando solo `SID`, `CLAVE` y `ORIGEN` por los valores del paso 1. No esperes el resultado: tarda de 2 a 5 minutos.
 
-1. En APP: `await PE.pendientes()` devuelve `{ id, tipo, codigo, tarea, cambio, fecha }`.
-   - `tipo` es `lb` (link) o `red` (redacción). `codigo` es el código de AppSheet (ej. `GAL-LIN-1-34`); vacío si es una tarea nueva.
-2. Mostrale la lista al usuario en una tabla corta y pedí **un OK para todo el lote**. Sin OK, no escribas nada.
-3. Por cada cambio, en AppSheet:
-   - Links: Gestión Link Building (`view=Link_Building`). Redacciones: Gestión Content (`view=Tasks`). Buscá el código con la búsqueda de la vista y abrí la tarea.
-   - Tocá Editar (lápiz), cambiá **solo** lo que dice el cambio y Guardá. Verificá que el detalle muestre el valor nuevo.
-   - Si AppSheet muestra un aviso que bloquea, no lo fuerces: cancelá, salteá ese cambio y copiá el texto del aviso para el resumen.
-   - "Tarea nueva", "Redacción nueva" y "Borrada en la app": no crees ni borres nada; dejalas para el usuario.
-   - "Redacción lista… pasarla al documento": probá `await PE.pegarEnDoc(tipo, tarea)` en APP. Si responde `ok`, contala como hecha; si no, dejala.
-   - Si la pantalla no coincide con lo que se describe acá, sacá una captura, contale qué ves y preguntá.
-4. En APP: `await PE.marcar([ids])` **solo** con los cambios que verificaste.
+```js
+{
+const SID = 'SID', CLAVE = 'CLAVE', ORIGEN = 'ORIGEN';
+// Proyectos Eleven · lectura de AppSheet. Solo lee la página: lee cada tabla dos veces y manda las lecturas a la app.
+window.__peSync = { estado: 'leyendo', paso: 'empezando', leidas: {} };
+(async () => {
+  const E = window.__peSync, espera = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const app = (location.hash.match(/appName=([^&]+)/) || [])[1];
+    if (!/appsheet\.com$/.test(location.host) || !app) throw new Error('Esta pestaña no tiene abierta la app Eleven - Operaciones.');
+    let as_email = ''; try { as_email = (JSON.parse(localStorage.JeeneeUserInfo || '{}').UserInfo || {}).AuthUserEmail || ''; } catch (e) { /* sin mail */ }
+    const visible = () => { if (document.visibilityState !== 'visible') throw new Error('La pestaña de AppSheet dejó de estar a la vista: AppSheet no dibuja las tablas en segundo plano.'); };
+    const TABLAS = {
+      lbProy: { es: (h) => h.includes('Proyecto') && h.includes('Presupuesto Mensual'), clave: 'Proyecto', re: /^[A-Z0-9]{2,5}-LIN-/ },
+      lb: { es: (h) => h.includes('Código') && h.includes('Anchors'), clave: 'Código', re: /^[A-Z0-9]{2,5}-LIN-.+-\d+$/, grupo: true },
+      red: { es: (h) => h.includes('Código') && h.includes('Tema'), clave: 'Código', re: /^[A-Z0-9]{2,5}-RED-.+-\d+$/ },
+    };
+    const tablas = () => [...document.querySelectorAll('.TableView')].map((tv) => ({ tv, enc: [...(tv.querySelector('.TableView__header')?.children || [])].map((c) => c.innerText.trim()) }));
+    const buscar = (p) => tablas().find((t) => TABLAS[p].es(t.enc) && [...t.tv.querySelectorAll('.TableViewRow')].some((f) => [...f.children].some((c) => TABLAS[p].re.test(c.innerText.trim()))));
+    const ir = async (vista, partes) => {
+      E.paso = 'abriendo ' + vista;
+      location.hash = 'appName=' + app + '&view=Operations'; await espera(1500);
+      location.hash = 'appName=' + app + '&view=' + vista + '&vss=';
+      for (let i = 0; i < 180 && !partes.every(buscar); i++) { visible(); await espera(500); }
+      if (!partes.every(buscar)) throw new Error('La vista ' + vista + ' no terminó de cargar sus tablas.');
+      await espera(2500);
+    };
+    const leer = async (parte, fraccion) => {
+      const T = TABLAS[parte], t = buscar(parte), enc = t.enc, ic = enc.indexOf(T.clave);
+      const sc = t.tv.querySelector('.TableView__list') || t.tv, filas = new Map();
+      sc.scrollTop = 0; await espera(1000);
+      let quietas = 0, ultimo = null, vueltas = 0;
+      while (quietas < 4 && vueltas++ < 5000) {
+        visible();
+        let grupo = null;
+        for (const el of sc.querySelectorAll('.GroupedHeaderRow, .TableViewRow')) {
+          if (el.classList.contains('GroupedHeaderRow')) { grupo = el.innerText.trim(); continue; }
+          const c = [...el.children].map((x) => x.innerText.trim()), k = c[ic];
+          if (!k || !T.re.test(k)) continue;
+          if (T.grupo && grupo === null) grupo = filas.has(k) ? filas.get(k).g : ultimo;
+          const f = T.grupo ? { g: grupo || '', c } : { c }, prev = filas.get(k);
+          if (prev && JSON.stringify(prev) !== JSON.stringify(f)) throw new Error(k + ' cambió en medio de la lectura (la tabla todavía estaba cargando). Volvé a sincronizar.');
+          filas.set(k, f); if (T.grupo) ultimo = grupo;
+        }
+        const antes = sc.scrollTop; sc.scrollTop += Math.max(40, sc.clientHeight * fraccion); await espera(450);
+        quietas = sc.scrollTop === antes ? quietas + 1 : 0;
+      }
+      return { encabezado: enc, filas: [...filas.values()] };
+    };
+    const enviar = async (parte, lectura, l) => {
+      E.paso = `enviando ${parte} (lectura ${lectura})`;
+      const n = Math.max(1, Math.ceil(l.filas.length / 150));
+      for (let i = 0; i < n; i++) {
+        const r = await fetch(ORIGEN + '/api/sync/lote', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sync-key': CLAVE },
+          body: JSON.stringify({ sid: SID, parte, lectura, seq: i, ultimo: i === n - 1, encabezado: l.encabezado, filas: l.filas.slice(i * 150, (i + 1) * 150), meta: { as_email } }) });
+        const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
+      }
+      E.leidas[parte + lectura] = l.filas.length;
+    };
+    for (const [lectura, fraccion] of [[1, 0.5], [2, 0.3]]) {
+      await ir('Link_Building', ['lbProy', 'lb']);
+      E.paso = `leyendo proyectos (lectura ${lectura})`; await enviar('lbProy', lectura, await leer('lbProy', fraccion));
+      E.paso = `leyendo links (lectura ${lectura})`; await enviar('lb', lectura, await leer('lb', fraccion));
+      await ir('Tasks', ['red']);
+      E.paso = `leyendo redacciones (lectura ${lectura})`; await enviar('red', lectura, await leer('red', fraccion));
+    }
+    E.estado = 'listo'; E.paso = 'listo';
+  } catch (e) { E.estado = 'error'; E.error = e.message; }
+})();
+'iniciado'
+}
+```
 
-## 3. Objetivos del mes (solo lectura)
+Consultá `window.__peSync` cada 20 segundos hasta que `estado` sea `listo` o `error`. Mientras tanto **no cambies de pestaña ni la minimices**. Si termina en `error`, traé la pestaña al frente y repetí este paso **una vez** (con el mismo `SID`). Si vuelve a fallar, avisale al usuario con el texto del error y no sigas.
 
-1. En APP: `await PE.proyectos()` devuelve los proyectos del usuario (`code`, `tipo`).
-2. Abrí el **Reporte**. Si no carga o pide acceso, no pidas acceso: salteá este paso y avisá en el resumen.
-3. En la página "Seguimiento Link Building", leé la tabla de proyectos: columnas Proyecto y "Q. piezas Mensual Plan.". Después andá a "Seguimiento Content" y leé la misma columna. Las tablas cargan filas al desplazarse; este script junta todas las filas de la tabla de la página actual:
+### 3. Leer los objetivos del reporte (pestaña nueva)
 
-   ```js
-   const filas = new Set();
-   const caja = [...document.querySelectorAll('*')].filter((e) => e.scrollHeight > e.clientHeight + 50 && e.clientHeight > 100 && /-(LIN|RED)-/.test(e.innerText || '') && e.innerText.length < 20000).sort((a, b) => a.innerText.length - b.innerText.length)[0];
-   for (let y = 0; caja && y < 20000; y += 300) { caja.scrollTop = y; await new Promise((r) => setTimeout(r, 250)); caja.querySelectorAll('.row, [role=row]').forEach((r) => filas.add(r.innerText.replace(/\n/g, ' | '))); if (y > caja.scrollHeight) break; }
-   [...filas]
-   ```
+1. Abrí el **Reporte** (página "Seguimiento Link Building") y ponelo al frente. Si no carga o pide acceso, no pidas acceso: salteá este paso (la app conserva los objetivos anteriores con su fecha) y avisalo al final.
+2. Ejecutá este código tal cual con `PARTE = 'objLin'` (reemplazando `SID`, `CLAVE` y `ORIGEN`):
 
-   Cada fila es `Cliente | Proyecto | Líder | Inicio | Cierre | Tratamiento | Periodo | Q. piezas Mensual Plan. | …`.
-4. En APP: `await PE.objetivos([{ code, piezasMes }, …])` solo con los proyectos del usuario que aparezcan en el reporte.
+```js
+{
+const SID = 'SID', CLAVE = 'CLAVE', ORIGEN = 'ORIGEN', PARTE = 'objLin';
+// Proyectos Eleven · lectura del reporte de seguimiento. Solo lee la página: lee la tabla de proyectos dos veces y la manda a la app.
+window.__peRep = { estado: 'leyendo', parte: PARTE };
+(async () => {
+  const E = window.__peRep, espera = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const buscar = () => {
+      for (const hr of document.querySelectorAll('.headerRow')) {
+        const enc = [...hr.querySelectorAll('.colName')].map((c) => c.innerText.trim());
+        if (!enc.includes('Proyecto') || !enc.includes('Q. piezas Mensual Plan.') || enc.includes('Mes de Planificación')) continue;
+        let root = hr; while (root && !root.querySelector('.row .cell')) root = root.parentElement;
+        if (root) return { enc, root };
+      }
+      return null;
+    };
+    let t = null;
+    for (let i = 0; i < 60 && !(t = buscar()); i++) await espera(1000);
+    if (!t) throw new Error('No encontré la tabla de proyectos con la columna «Q. piezas Mensual Plan.» (¿cargó la página?).');
+    const pag = (t.root.innerText.match(/(\d+)\s*-\s*(\d+)\s*\/\s*(\d+)/) || []).map(Number);
+    if (pag.length && (pag[1] !== 1 || pag[2] !== pag[3])) throw new Error('La tabla tiene varias páginas; no se puede leer completa.');
+    const ic = t.enc.indexOf('Proyecto');
+    const sc = [t.root, ...t.root.querySelectorAll('*')].filter((e) => e.scrollHeight > e.clientHeight + 10 && e.querySelector('.row')).sort((a, b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0] || t.root;
+    const leer = async (paso) => {
+      const filas = new Map(); sc.scrollTop = 0; await espera(800);
+      let quietas = 0, vueltas = 0;
+      while (quietas < 4 && vueltas++ < 2000) {
+        for (const row of t.root.querySelectorAll('.row')) {
+          const c = [...row.querySelectorAll('.cell')].map((x) => x.innerText.trim()), k = c[ic];
+          if (!k || c.length !== t.enc.length) continue;
+          const prev = filas.get(k); if (prev && JSON.stringify(prev.c) !== JSON.stringify(c)) throw new Error(k + ' cambió en medio de la lectura.');
+          filas.set(k, { c });
+        }
+        const antes = sc.scrollTop; sc.scrollTop += paso; await espera(350);
+        quietas = sc.scrollTop === antes ? quietas + 1 : 0;
+      }
+      if (pag.length && filas.size !== pag[3]) throw new Error(`Se leyeron ${filas.size} filas y la tabla dice ${pag[3]}.`);
+      return [...filas.values()];
+    };
+    for (const [lectura, paso] of [[1, 200], [2, 120]]) {
+      const filas = await leer(paso);
+      const r = await fetch(ORIGEN + '/api/sync/lote', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sync-key': CLAVE }, body: JSON.stringify({ sid: SID, parte: PARTE, lectura, seq: 0, ultimo: true, encabezado: t.enc, filas }) });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
+      E['lectura' + lectura] = filas.length;
+    }
+    E.estado = 'listo';
+  } catch (e) { E.estado = 'error'; E.error = e.message; }
+})();
+'iniciado'
+}
+```
 
-## Cerrar
+3. Consultá `window.__peRep` hasta que diga `listo` o `error`.
+4. Andá a la página **"Seguimiento Content"** (tocá su nombre en el menú del reporte), esperá que cargue y repetí el código con `PARTE = 'objRed'`.
+5. Si alguno termina en `error`, repetilo una vez. Si vuelve a fallar, seguí sin esa parte y avisalo al final.
 
-1. En APP registrá tu tiempo: `await PE.tiempo('Sincronizar AppSheet', inicio, Date.now(), [{ tipo, tarea }, …])` con las tareas que tocaste (o `[]` si solo trajiste).
-2. Respondé con un resumen breve: cuántos links y redacciones se trajeron, objetivos actualizados, cambios pasados y los que salteaste con el motivo.
+### 4. Revisar (pestaña APP)
+
+```js
+window.__inf = await PE.syncRevisar(window.__s.sid); window.__inf
+```
+- `ok: false` → **no se escribió nada**. Contale al usuario los `errores` tal cual, y que vuelva a tocar **Sincronizar**. Terminá acá.
+- `requiereConfirmacion: true` → mostrale los `motivosConfirmacion` en una lista corta y preguntá si los aplica. Sin un "sí" explícito, no apliques.
+
+### 5. Aplicar (pestaña APP)
+
+```js
+await PE.syncAplicar(window.__s.sid, false)   // o true si el usuario confirmó en el paso 4
+```
+Se aplica todo junto o nada. Después la app compara lo guardado con lo leído: tiene que volver `verificacion.ok: true`. Si viene `false`, decile al usuario que la verificación encontró diferencias (copiá las primeras) y que no confíe en esos datos hasta volver a sincronizar.
+
+### 6. Cerrar
+
+1. En APP: `await PE.tiempo('Sincronizar AppSheet', window.__inicio, Date.now())`.
+2. Respondé con un resumen breve: links y redacciones (total, nuevas, cambiadas, borradas), proyectos, objetivos actualizados (o por qué no), advertencias y el resultado de la verificación. Decile que ya puede volver a la ventana de Proyectos Eleven: se actualiza sola.

@@ -1,10 +1,18 @@
 # Proyectos Eleven
 
-App personal de escritorio (PWA instalable en Chrome o Edge) para seguir los proyectos de Eleven habilitados en AppSheet: tareas de link building, redacciones, horas contra el plan del mes, deadlines en Google Calendar y avisos. Cloudflare Worker + D1.
+App de escritorio (PWA instalable en Chrome o Edge) para líderes: tablero de solo lectura con los proyectos de Eleven en AppSheet (links, redacciones, semáforo, objetivos del reporte de seguimiento y presupuesto). Cloudflare Worker + D1.
 
-- `src/worker.ts` — API (una sola cuenta con contraseña), calendario `.ics`, avisos push y registro de cambios para reflejar en AppSheet.
-- `src/schema.ts` — tablas (el servidor las crea solo, con los proyectos y el plan iniciales).
-- `public/shared.js` — estados de AppSheet, tipos de tarea, proyectos iniciales y validaciones (DR, tráfico, precio, medio repetido).
-- `public/` — la app (`app.js`, `style.css`, `sw.js`).
+**Esta versión es solo modo líder.** El modo técnico (edición, IA, horas, pruebas) está deshabilitado.
+
+## Sincronización con AppSheet (a pedido)
+
+La app no se actualiza sola: el líder toca **Sincronizar** y su Claude (skill `proyectos-eleven`, en `public/claude/SKILL.md`) lee AppSheet y el reporte con su sesión, solo leyendo.
+
+1. `POST /api/sync/iniciar` → `sid` y una clave de un solo uso (vence en 1 hora).
+2. Los códigos de lectura de la skill leen **dos veces** cada tabla (con pasos de desplazamiento distintos) y mandan cada lectura a `POST /api/sync/lote` (solo desde appsheet.com y el reporte, con esa clave).
+3. `POST /api/sync/revisar`: ubica las columnas por nombre, valida cada fila (códigos, fechas, importes), exige que las dos lecturas sean idénticas y compara con lo que hay. No escribe nada.
+4. `POST /api/sync/aplicar`: si no hay errores (y, cuando hace falta, con confirmación), reemplaza todo de una vez por la foto completa —incluye borrar lo que ya no está en AppSheet— y después compara lo guardado con lo leído.
+
+Validación y comparación: `src/sync.ts`. Servidor: `src/worker.ts`. Esquema: `src/schema.ts`. App: `public/`.
 
 Pruebas: `npm test`. Servidor local: `npm run dev` (puerto 8787). Publicar: push a `main`.

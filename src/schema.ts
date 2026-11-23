@@ -54,6 +54,9 @@ export const MIGRATIONS = [
   `CREATE INDEX IF NOT EXISTS lb_uid ON lb_tasks (uid)`,
   `CREATE INDEX IF NOT EXISTS red_uid ON redacciones (uid)`,
   `ALTER TABLE users ADD COLUMN modo TEXT NOT NULL DEFAULT 'tecnico'`,
+  // sincronización con AppSheet en etapas: se recibe todo, se revisa y recién ahí se aplica de una vez
+  `CREATE TABLE IF NOT EXISTS sync_runs (sid TEXT PRIMARY KEY, uid TEXT NOT NULL, clave TEXT NOT NULL, created_at INTEGER NOT NULL, estado TEXT NOT NULL DEFAULT 'leyendo', informe TEXT NOT NULL DEFAULT '')`,
+  `CREATE TABLE IF NOT EXISTS sync_stage (sid TEXT NOT NULL, parte TEXT NOT NULL, lectura INTEGER NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (sid, parte, lectura, seq))`,
 ];
 
 /** Tablas que pasan a tener clave por usuario (se reconstruyen una vez). */

@@ -95,31 +95,6 @@ test('avisos programados: una vez por día', async () => {
   assert.deepEqual(await runAvisos(U1(env), 'https://pe.test', t + 60000), []);
 });
 
-test('importación desde AppSheet', async () => {
-  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1' })).j.token;
-  const lb = [['GAL-LIN-1-31', '30/11/2026', 'Intervalo métrica 21-40', 'Enviado a Medio', 'cotizar seguro auto', 'lamanana.com.ar', 'Acuerdo Alcanzado', 'ARS', '$143,537.56', '', 'Martín Botana', 'laura@eleven-agencia.net'],
-    ['TEL-LIN-2-164', '30/11/2026', 'Intervalo métrica 21-40', 'Backlink Publicado', 'Honor X5c', 'inneuquen.info', 'Acuerdo Vencido', 'USD', '$160.00', '19/11/2026', 'Franco Mercado', 'natalia@eleven-agencia.net'],
-    ['BOD-LIN-1-1', '30/11/2026', '', 'No Iniciado', '', '', '', '', '', '', 'X', '']];
-  const red = [['LAV-RED-5-90', 'Receta de vitel toné', 'Argentina', 'Español', '', '', '30/11/2026', 'Normal', 'Para CMS', '', 'Martín Botana', '2/11/2026']];
-  assert.equal((await call(env, '/api/import', 'POST', { lb, red })).status, 401, 'sin clave no entra');
-  await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('u1:import_key', 'clave-de-importacion-larga-123')").run();
-  const r = await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': 'clave-de-importacion-larga-123' }, body: JSON.stringify({ lb, red }) }), env as any);
-  const j: any = await r.json();
-  assert.deepEqual(j, { lb: 2, red: 1, saltadas: 1, proyectosNuevos: [] });
-  assert.equal(r.headers.get('access-control-allow-origin'), 'https://www.appsheet.com');
-  // los datos propios se conservan al reimportar
-  let d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
-  const t = d.lb.find((x: any) => x.id === 'GAL-LIN-1-31');
-  assert.equal(t.precio, 143537.56); assert.equal(t.deadline, '2026-11-30'); assert.equal(t.estado, 'Enviado a Medio');
-  assert.equal(d.as_pend.length, 0, 'importar no genera pendientes');
-  await call(env, '/api/lb', 'POST', { ...t, notas: 'nota mía', dr: 30 }, tok);
-  await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'x-import-key': 'clave-de-importacion-larga-123' }, body: JSON.stringify({ lb: [lb[0].map((v, i) => (i === 3 ? 'Backlink Publicado' : i === 9 ? '20/11/2026' : v))] }) }), env as any);
-  d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
-  const t2 = d.lb.find((x: any) => x.id === 'GAL-LIN-1-31');
-  assert.equal(t2.estado, 'Backlink Publicado'); assert.equal(t2.publicado, '2026-11-20'); assert.equal(t2.notas, 'nota mía'); assert.equal(t2.dr, 30);
-  assert.equal(d.red[0].entregada, '2026-11-02'); assert.equal(d.red[0].usuario, 'Martín Botana');
-});
-
 test('redacción manual de una tarea', async () => {
   const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { password: 'clave-segura-1' })).j.token;
   const id = (await call(env, '/api/lb', 'POST', { project: 'LAV-LIN-4', estado: 'Gestión de Backlink', anchor: 'pan dulce' }, tok)).j.id;
@@ -264,20 +239,7 @@ test('varios usuarios: invitación, datos separados y carga desde AppSheet', asy
   let df = (await call(env, '/api/data', 'GET', undefined, tf)).j;
   assert.equal(df.me.nombre, 'Franco Mercado'); assert.equal(df.lb.length, 0); assert.equal(df.projects.length, 0); assert.equal(df.prompts.length, 0);
   assert.equal((await call(env, '/api/invites', 'POST', {}, tf)).status, 403);
-  assert.equal((await call(env, '/api/usuarios/modo', 'POST', { id: 'u1', modo: 'lider' }, tf)).status, 403);
-  await call(env, '/api/usuarios/modo', 'POST', { id: df.me.id, modo: 'lider' }, tok);
-  assert.equal((await call(env, '/api/data', 'GET', undefined, tf)).j.me.modo, 'lider', 'el admin le elige el modo');
-  // carga desde AppSheet con su clave: crea sus proyectos (copiando parámetros y prompts) y no pisa las tareas de Martín
-  const key = (await call(env, '/api/import-key', 'GET', undefined, tf)).j.key;
-  const lb = [['TEL-LIN-2-164', '30/11/2026', 'Intervalo métrica 21-40', 'Backlink Publicado', 'Honor X5c', 'inneuquen.info', 'Acuerdo Vencido', 'USD', '$160.00', '19/11/2026', 'Franco Mercado', 'natalia@x'],
-    ['NAV-LIN-5-60', '30/11/2026', 'Intervalo métrica 21-40', 'Gestión de Backlink', 'medios de pago', 'x.com', '', '', '', '', 'Martín Botana', '']];
-  const r = await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'x-import-key': key }, body: JSON.stringify({ lb, red: [], proyectos: ['TEL-LIN-2'] }) }), env as any);
-  const j: any = await r.json();
-  assert.deepEqual(j.proyectosNuevos, ['TEL-LIN-2']); assert.equal(j.lb, 1); assert.equal(j.saltadas, 1, 'NAV no es proyecto suyo');
-  df = (await call(env, '/api/data', 'GET', undefined, tf)).j;
-  assert.equal(df.lb[0].as_code, 'TEL-LIN-2-164'); assert.notEqual(df.lb[0].id, 'TEL-LIN-2-164', 'id propio');
-  assert.equal(df.projects[0].params.drMin, 20, 'copia los parámetros del proyecto');
-  assert.ok(df.prompts.some((p: any) => p.project === 'TEL-LIN-2'), 'copia los prompts');
+  assert.equal(df.me.modo, 'lider', 'esta versión es solo para líderes');
   // y Martín sigue viendo solo lo suyo
   const dm = (await call(env, '/api/data', 'GET', undefined, tok)).j;
   assert.equal(dm.lb.length, 1); assert.equal(dm.lb[0].anchor, 'de Martín'); assert.equal(dm.usuarios.length, 2);
@@ -328,12 +290,6 @@ test('conectar Claude: enlace de un solo uso, objetivos del reporte y link de Ap
   assert.equal((await call(env, '/api/conectar/usar', 'POST', { token: c.token })).status, 401, 'no se puede reusar');
   let d = (await call(env, '/api/data', 'GET', undefined, u.j.token)).j;
   assert.ok(Number(d.settings.conectado_at) > 0);
-  // objetivos: LIN copia a linksMes; RED queda en piezasMes; proyectos ajenos se ignoran
-  const o = (await call(env, '/api/objetivos', 'POST', { items: [{ code: 'XUB-LIN-1', piezasMes: 6 }, { code: 'LAV-RED-5', piezasMes: 30 }, { code: 'MER-LIN-9', piezasMes: 60 }] }, tok)).j;
-  assert.equal(o.actualizados, 2);
-  d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
-  const p = (code: string) => d.projects.find((x: any) => x.code === code).params;
-  assert.equal(p('XUB-LIN-1').linksMes, 6); assert.equal(p('LAV-RED-5').piezasMes, 30); assert.ok(p('LAV-RED-5').objetivosAt);
   // link de AppSheet: solo el admin y solo appsheet.com/start
   await call(env, '/api/settings', 'POST', { as_url: 'https://evil.com/start/x' }, tok);
   assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.settings.as_url, '');
@@ -344,9 +300,156 @@ test('conectar Claude: enlace de un solo uso, objetivos del reporte y link de Ap
 test('alta solo con mail: el nombre sale del mail y después de AppSheet', async () => {
   const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@eleven.com', password: 'clave-segura-1' })).j.token;
   assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.me.nombre, 'Martin Botana');
-  const key = (await call(env, '/api/import-key', 'GET', undefined, tok)).j.key;
-  const lb = [['GAL-LIN-1-1', '30/11/2026', 'Intervalo', 'Para Enviar', 'a', 'x.com', '', '', '', '', 'Martín Botana', '']];
-  await handle(new Request('https://pe.test/api/import', { method: 'POST', headers: { 'content-type': 'application/json', 'x-import-key': key }, body: JSON.stringify({ lb, red: [], proyectos: ['GAL-LIN-1'], as_nombre: 'Martín Botana' }) }), env as any);
+  await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb: [LB('GAL-LIN-1-1')], red: [RED('GAL-RED-1-1')], email: 'martin.botana@eleven.com' });
   const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
-  assert.equal(d.me.nombre, 'Martín Botana'); assert.equal(d.lb.length, 1);
+  assert.equal(d.me.nombre, 'Martín Botana', 'toma el nombre tal como figura en AppSheet'); assert.equal(d.lb.length, 1);
+});
+
+// ======================= sincronización con AppSheet (a pedido, en etapas, todo o nada) =======================
+const H_PROY = ['Cliente', 'Proyecto', 'Estado', 'Fecha Inicio', 'Duración (Meses)', 'Fecha Cierre', 'Presupuesto Mensual', 'Moneda'];
+const PROY = (code: string, cliente = 'Galicia Seguros') => ({ c: [cliente, code, 'En Ejecución', '1/2/2026', '12', '31/1/2027', '1,331,469.00', 'ARS'] });
+const H_LB = ['', '', 'Código', 'Tipo de Servicio', 'Estado Tarea', 'Anchors', 'Medio', 'Estado Negociación', 'Moneda Backlink', 'Precio Backlink', 'Fecha Entrega', 'Usuario Asignado', 'Mail Eleven', '', ''];
+const LB = (code: string, o: Record<string, string> = {}) => { const v = { g: '30/11/2026', tipo: 'Intervalo métrica 21-40', estado: 'Gestión de Backlink', anchor: 'anchor ' + code, medio: 'medio.com', neg: 'Acuerdo Alcanzado', moneda: 'USD', precio: '$95.00', entrega: '', usuario: 'Martín Botana', mail: 'laura@x.com', ...o };
+  return { g: v.g, c: ['Abrir tarea', '', code, v.tipo, v.estado, v.anchor, v.medio, v.neg, v.moneda, v.precio, v.entrega, v.usuario, v.mail, '', 'Histórico'] }; };
+const H_RED = ['Código', 'Tema', 'País', 'Idioma', 'Sub-Proyecto', 'Variante de Sub-Proyecto', 'Deadline Tarea', 'Prioridad', 'Estado Tarea', 'Deadline Estado', 'Usuario Asignado', 'Fecha Entrega', '', ''];
+const RED = (code: string, o: Record<string, string> = {}) => { const v = { tema: 'tema ' + code, deadline: '30/11/2026', estado: 'Entrega', usuario: 'Martín Botana', entrega: '', ...o };
+  return { c: [code, v.tema, 'Argentina', 'Español', '', '', v.deadline, 'Normal', v.estado, '', v.usuario, v.entrega, '', 'Histórico'] }; };
+const H_OBJ = ['Cliente', 'Proyecto', 'Lider de Proyecto', 'Fecha Inicio', 'Fecha Cierre', 'Tratamiento', 'Periodo de Avance', 'Q. piezas Mensual Plan.', 'Q. Piezas Mensual Entregadas'];
+const OBJ = (code: string, n: number | string) => ({ c: ['X', code, 'Líder', 'feb 2026', 'ene 2027', 'Cantidad', 'Mensual', String(n), '0'] });
+async function lote(env: any, sid: string, clave: string, parte: string, lectura: number, encabezado: string[], filas: any[], meta?: any, origin = 'https://www.appsheet.com') {
+  // en dos tandas, para probar que se juntan bien
+  const mitad = Math.ceil(filas.length / 2), tandas = filas.length > 1 ? [filas.slice(0, mitad), filas.slice(mitad)] : [filas];
+  let r: Response | null = null;
+  for (let i = 0; i < tandas.length; i++) r = await handle(new Request('https://pe.test/api/sync/lote', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sync-key': clave, origin }, body: JSON.stringify({ sid, parte, lectura, seq: i, ultimo: i === tandas.length - 1, encabezado, filas: tandas[i], meta }) }), env);
+  return r!;
+}
+async function sincronizar(env: any, tok: string, o: { proy: any[]; lb: any[]; red: any[]; lb2?: any[]; hLb?: string[]; objLin?: any[]; objRed?: any[]; email?: string; confirmar?: boolean; soloRevisar?: boolean }) {
+  const s = (await call(env, '/api/sync/iniciar', 'POST', {}, tok)).j;
+  for (const lectura of [1, 2]) {
+    await lote(env, s.sid, s.clave, 'lbProy', lectura, H_PROY, o.proy);
+    await lote(env, s.sid, s.clave, 'lb', lectura, o.hLb || H_LB, lectura === 2 && o.lb2 ? o.lb2 : o.lb, { as_email: o.email || 'martin.botana@agenciaeleven.com' });
+    await lote(env, s.sid, s.clave, 'red', lectura, H_RED, o.red);
+    if (o.objLin) await lote(env, s.sid, s.clave, 'objLin', lectura, H_OBJ, o.objLin, undefined, 'https://datastudio.google.com');
+    if (o.objRed) await lote(env, s.sid, s.clave, 'objRed', lectura, H_OBJ, o.objRed, undefined, 'https://datastudio.google.com');
+  }
+  const rev = (await call(env, '/api/sync/revisar', 'POST', { sid: s.sid }, tok)).j;
+  if (o.soloRevisar) return { s, rev, ap: null as any };
+  const ap = await call(env, '/api/sync/aplicar', 'POST', { sid: s.sid, confirmar: o.confirmar }, tok);
+  return { s, rev, ap };
+}
+const nuevaCuenta = async () => { const env = mkEnv(); await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('seed_v', '99')").run().catch(() => undefined); return env; };
+
+test('sincronización: trae solo lo tuyo, con objetivos, y verifica lo guardado', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@agenciaeleven.com', password: 'clave-segura-1' })).j.token;
+  await env.DB.prepare("DELETE FROM projects").run();
+  const { rev, ap } = await sincronizar(env, tok, {
+    proy: [PROY('GAL-LIN-1')],
+    lb: [LB('GAL-LIN-1-34'), LB('GAL-LIN-1-35', { usuario: 'Franco Mercado', g: '31/12/2026', precio: '$143,537.56', moneda: 'ARS' }), LB('NAV-LIN-5-1', { usuario: 'Franco Mercado' })],
+    red: [RED('GAL-RED-1-1'), RED('TEL-RED-2-1', { usuario: 'Franco Mercado' }), RED('MER-RED-SQ-3-7', { usuario: 'Otra' })],
+    objLin: [OBJ('GAL-LIN-1', 3), OBJ('MER-LIN-9', 60)], objRed: [OBJ('GAL-RED-1', 8)],
+  });
+  assert.equal(rev.ok, true, JSON.stringify(rev.errores));
+  assert.equal(rev.yo, 'Martín Botana');
+  assert.deepEqual(rev.proyectos.tuyos, ['GAL-LIN-1', 'GAL-RED-1']);
+  assert.deepEqual([rev.links.total, rev.links.nuevas, rev.redacciones.total], [2, 2, 1]);
+  assert.equal(rev.requiereConfirmacion, false);
+  assert.equal(ap.status, 200, JSON.stringify(ap.j)); assert.equal(ap.j.verificacion.ok, true);
+  const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.me.nombre, 'Martín Botana');
+  const t = d.lb.find((x: any) => x.as_code === 'GAL-LIN-1-35');
+  assert.deepEqual([t.deadline, t.precio, t.moneda, t.usuario, t.estado], ['2026-12-31', 143537.56, 'ARS', 'Franco Mercado', 'Gestión de Backlink']);
+  assert.equal(d.lb.length, 2); assert.equal(d.red.length, 1);
+  const p = (c: string) => d.projects.find((x: any) => x.code === c);
+  assert.equal(p('GAL-LIN-1').params.linksMes, 3); assert.equal(p('GAL-LIN-1').params.presupuestoMensual, 1331469); assert.equal(p('GAL-RED-1').params.piezasMes, 8); assert.equal(p('GAL-RED-1').cliente, 'Galicia Seguros');
+  assert.ok(Number(d.settings.as_sync_at) > 0); assert.equal(JSON.parse(d.settings.as_sync_info).verificado, true);
+  // una sincronización aplicada no se puede volver a aplicar
+  assert.equal((await call(env, '/api/sync/aplicar', 'POST', { sid: ap.j.sid }, tok)).status, 409);
+});
+
+test('sincronización: si las dos lecturas no coinciden no se escribe nada', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@agenciaeleven.com', password: 'clave-segura-1' })).j.token;
+  const lb = [LB('GAL-LIN-1-1'), LB('GAL-LIN-1-2'), LB('GAL-LIN-1-3')];
+  const { rev, ap } = await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb, lb2: [lb[0], lb[2]], red: [RED('GAL-RED-1-1')] });
+  assert.equal(rev.ok, false); assert.match(rev.errores.join(' '), /no coinciden.*GAL-LIN-1-2/);
+  assert.equal(ap.status, 409);
+  const d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.lb.length, 0); assert.equal(d.settings.as_sync_at, '');
+  // también si cambia un dato entre lecturas (p. ej. el mes planificado perdido al desplazar)
+  const r2 = await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb, lb2: [lb[0], lb[1], LB('GAL-LIN-1-3', { g: '31/10/2026' })], red: [RED('GAL-RED-1-1')], soloRevisar: true });
+  assert.equal(r2.rev.ok, false); assert.match(r2.rev.errores.join(' '), /datos distintos: GAL-LIN-1-3/);
+});
+
+test('sincronización: columnas por nombre (no por posición) y filas inválidas frenan todo', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@agenciaeleven.com', password: 'clave-segura-1' })).j.token;
+  // AppSheet agrega o mueve columnas: se ubica todo por nombre
+  const hMovido = ['Código', 'Columna nueva', ...H_LB.slice(3)], fila = (code: string) => { const f = LB(code); return { g: f.g, c: [code, 'algo', ...f.c.slice(3)] }; };
+  const ok = await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb: [fila('GAL-LIN-1-1')], red: [RED('GAL-RED-1-1')], hLb: hMovido });
+  assert.equal(ok.rev.ok, true, JSON.stringify(ok.rev.errores));
+  assert.equal((await call(env, '/api/data', 'GET', undefined, tok)).j.lb[0].tipo_servicio, 'Intervalo métrica 21-40');
+  // falta una columna
+  const sinEstado = H_LB.map((x) => (x === 'Estado Tarea' ? 'Estado' : x));
+  const r1 = await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb: [LB('GAL-LIN-1-1')], red: [RED('GAL-RED-1-1')], hLb: sinEstado, soloRevisar: true });
+  assert.equal(r1.rev.ok, false); assert.match(r1.rev.errores.join(' '), /falta la columna «Estado Tarea»/);
+  // sin mes planificado, fecha imposible, importe con formato raro
+  const r2 = await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb: [LB('GAL-LIN-1-1', { g: '' }), LB('GAL-LIN-1-2', { entrega: '31/2/2026' }), LB('GAL-LIN-1-3', { precio: 'USD 95 aprox' })], red: [RED('GAL-RED-1-1')], soloRevisar: true });
+  assert.equal(r2.rev.ok, false);
+  const e = r2.rev.errores.join(' ');
+  assert.match(e, /GAL-LIN-1-1: sin mes planificado/); assert.match(e, /GAL-LIN-1-2: fecha inválida «31\/2\/2026»/); assert.match(e, /GAL-LIN-1-3: importe inválido/);
+  // una tabla que no se leyó
+  const s = (await call(env, '/api/sync/iniciar', 'POST', {}, tok)).j;
+  for (const l of [1, 2]) await lote(env, s.sid, s.clave, 'lbProy', l, H_PROY, [PROY('GAL-LIN-1')]);
+  const rev = (await call(env, '/api/sync/revisar', 'POST', { sid: s.sid }, tok)).j;
+  assert.match(rev.errores.join(' '), /Gestión Link Building · Tareas: no se leyó/); assert.match(rev.errores.join(' '), /Gestión Content · Tareas: no se leyó/);
+});
+
+test('sincronización: foto completa y confirmación ante cambios sospechosos', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@agenciaeleven.com', password: 'clave-segura-1' })).j.token;
+  const lb = [...Array(12)].map((_, i) => LB('GAL-LIN-1-' + (i + 1)));
+  await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb, red: [RED('GAL-RED-1-1', { entrega: '2/11/2026' })] });
+  // durante el día: una tarea cambia de estado y otra desaparece de AppSheet → se refleja tal cual
+  const lb2 = lb.slice(1).map((f, i) => (i === 0 ? LB('GAL-LIN-1-2', { estado: 'Backlink Publicado' }) : f));
+  const r = await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb: lb2, red: [RED('GAL-RED-1-1', { entrega: '2/11/2026' })] });
+  assert.equal(r.rev.requiereConfirmacion, false);
+  assert.deepEqual([r.rev.links.cambiadas, r.rev.links.borradas], [1, 1]);
+  let d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.lb.length, 11); assert.ok(!d.lb.some((x: any) => x.as_code === 'GAL-LIN-1-1'));
+  assert.equal(d.lb.find((x: any) => x.as_code === 'GAL-LIN-1-2').estado, 'Backlink Publicado');
+  // un dato clave que queda vacío pide confirmación; sin ella no se aplica nada
+  const r3 = await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb: lb2, red: [RED('GAL-RED-1-1', { deadline: '' })] });
+  assert.equal(r3.rev.requiereConfirmacion, true); assert.match(r3.rev.motivosConfirmacion.join(' '), /GAL-RED-1-1: fecha_entrega/);
+  assert.equal(r3.ap.status, 409);
+  d = (await call(env, '/api/data', 'GET', undefined, tok)).j;
+  assert.equal(d.red[0].fecha_entrega, '2026-11-30', 'sin confirmación no cambió nada');
+  const ok = await call(env, '/api/sync/aplicar', 'POST', { sid: r3.s.sid, confirmar: true }, tok);
+  assert.equal(ok.status, 200); assert.equal(ok.j.verificacion.ok, true);
+  // si desaparecen muchas tareas de golpe, también pide confirmación
+  const r4 = await sincronizar(env, tok, { proy: [PROY('GAL-LIN-1')], lb: lb2.slice(0, 2), red: [RED('GAL-RED-1-1')], soloRevisar: true });
+  assert.equal(r4.rev.requiereConfirmacion, true); assert.match(r4.rev.motivosConfirmacion.join(' '), /9 links ya no están/);
+});
+
+test('sincronización: la clave de lote es de un solo uso y solo desde AppSheet o el reporte', async () => {
+  const env = mkEnv(), tok = (await call(env, '/api/setup', 'POST', { email: 'martin.botana@agenciaeleven.com', password: 'clave-segura-1' })).j.token;
+  const s = (await call(env, '/api/sync/iniciar', 'POST', {}, tok)).j;
+  assert.equal((await lote(env, s.sid, 'clave-equivocada-de-relleno-123', 'lb', 1, H_LB, [LB('GAL-LIN-1-1')])).status, 401);
+  const ok = await lote(env, s.sid, s.clave, 'lb', 1, H_LB, [LB('GAL-LIN-1-1')]);
+  assert.equal(ok.status, 200); assert.equal(ok.headers.get('access-control-allow-origin'), 'https://www.appsheet.com');
+  const otro = await lote(env, s.sid, s.clave, 'lb', 1, H_LB, [LB('GAL-LIN-1-1')], undefined, 'https://evil.example');
+  assert.equal(otro.headers.get('access-control-allow-origin'), null, 'otros sitios no pueden leer la respuesta');
+  assert.equal((await lote(env, s.sid, s.clave, 'nada', 1, H_LB, [])).status, 400);
+  // la sincronización de otra cuenta no se puede revisar
+  const inv = (await call(env, '/api/invites', 'POST', {}, tok)).j, tf = (await call(env, '/api/signup', 'POST', { invitacion: inv.token, email: 'franco.mercado@x.com', password: 'clave-franco-1' })).j.token;
+  assert.equal((await call(env, '/api/sync/revisar', 'POST', { sid: s.sid }, tf)).status, 404);
+});
+
+test('sincronización: conversiones de AppSheet', async () => {
+  const { fechaAS, importeAS, enteroAS, RE } = await import('../src/sync.ts');
+  assert.equal(fechaAS('1/2/2026'), '2026-02-01'); assert.equal(fechaAS(''), '');
+  assert.throws(() => fechaAS('31/2/2026')); assert.throws(() => fechaAS('2026-02-01')); assert.throws(() => fechaAS('feb 2026'));
+  assert.equal(importeAS('$143,537.56'), 143537.56); assert.equal(importeAS('1,331,469.00'), 1331469); assert.equal(importeAS('$72.00'), 72); assert.equal(importeAS(''), null);
+  assert.throws(() => importeAS('$1.234,50')); assert.throws(() => importeAS('USD 95'));
+  assert.equal(enteroAS('30'), 30); assert.equal(enteroAS('-'), null); assert.throws(() => enteroAS('-6'));
+  for (const c of ['GAL-LIN-1', 'WNP-LIN-13.1']) assert.ok(RE.proyLIN.test(c), c);
+  for (const c of ['XUB-RED-1', 'MER-RED-SQ-3', 'ASS-RED-US-2', 'CAL-RED-NE-1']) assert.ok(RE.proyRED.test(c), c);
+  for (const c of ['MER-RED-SQ-3-12', 'LAV-RED-5-1']) assert.ok(RE.tareaRED.test(c), c);
+  assert.ok(!RE.tareaLIN.test('GAL-LIN-1')); assert.ok(!RE.tareaRED.test('Abrir tarea'));
 });

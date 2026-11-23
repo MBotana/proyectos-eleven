@@ -38,7 +38,7 @@ const IC = {
   img: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>', doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>',
   play: '<path d="M7 4v16l13-8z"/>', stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>', copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
 };
-Object.assign(IC, { tablero: IC.inicio, lproyectos: IC.proyectos, lalertas: IC.alertas });
+Object.assign(IC, { tablero: IC.inicio, lproyectos: IC.proyectos, lalertas: IC.alertas, lajustes: IC.ajustes });
 const ic = (k) => `<svg class="i" viewBox="0 0 24 24">${IC[k]}</svg>`;
 
 async function api(path, method = 'GET', body) {
@@ -88,15 +88,46 @@ function render() {
   $('#nav').innerHTML = vistas.map(([k, t]) => (k === 'sep' ? '<div class="navsep"></div>' : `<button data-act="view" data-v="${k}" class="${S.view === k ? 'on' : ''}">${ic(k)}<span>${t}</span>${counts[k] ? `<span class="count${k === 'alertas' ? ' hotc' : ''}">${counts[k]}</span>` : ''}</button>`)).join('');
   S.enPruebas = S.view === 'pruebas';
   const v = VIEWS_FN[S.view] || VIEWS_FN.inicio, out = v();
-  $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}<button class="btn sec" data-act="actualizar" title="Trae los últimos cambios (los míos y los tuyos) y la última versión de la app">${ic('refresh')}Actualizar</button></div>`;
-  const keep = $('#view').scrollTop; $('#view').innerHTML = out.body; $('#view').scrollTop = keep;
-  if (modo === 'lider') renderModo(); else renderTimer();
+  $('#head').innerHTML = `<div><h1>${out.title}</h1>${out.sub ? `<div class="sub">${out.sub}</div>` : ''}</div><div class="actions">${out.actions || ''}<button class="btn sec" data-act="actualizar" title="Vuelve a cargar lo que ya está en la app (no lee AppSheet)">Recargar</button>${botonSync()}</div>`;
+  const keep = $('#view').scrollTop; $('#view').innerHTML = bannerSync() + out.body; $('#view').scrollTop = keep;
+  renderSyncSide();
 }
-/** Selector de modo en la barra lateral (cada uno puede alternar; el predeterminado lo elige quien administra). */
-function renderModo() {
-  const el = $('#sidetimer'); if (!el) return; const m = modoActual();
-  el.innerHTML = `<div class="lbl">Modo</div><div class="seg2"><button class="${m === 'tecnico' ? 'on' : ''}" data-act="modo" data-v="tecnico">Técnico</button><button class="${m === 'lider' ? 'on' : ''}" data-act="modo" data-v="lider">Líder</button></div>`;
+// ---------- sincronización a pedido (botón Sincronizar) ----------
+const fmtHora = (ms) => new Date(ms).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+function syncInfo() {
+  const st = S.data?.settings || {}, at = Number(st.as_sync_at) || 0; let info = {};
+  try { info = JSON.parse(st.as_sync_info || '{}') || {}; } catch { /* sin info */ }
+  return { at, hoy: !!at && hoyEn(undefined, at) === hoy(), info };
 }
+const botonSync = () => `<button class="btn" data-act="sync" ${S.syncEsperando ? 'disabled' : ''} title="Claude lee AppSheet y el reporte de seguimiento (dos veces cada tabla), valida todo y recién ahí actualiza la app">${ic('refresh')}${S.syncEsperando ? 'Sincronizando…' : 'Sincronizar'}</button>`;
+function bannerSync() {
+  const s = syncInfo(), box = (cls, html) => `<div class="alert ${cls}" style="margin:0 0 16px">${html}</div>`;
+  if (S.syncEsperando) return box('info', `<b>Sincronizando con AppSheet…</b> Claude está leyendo AppSheet y el reporte (dos veces cada tabla). Esta ventana se actualiza sola cuando termine. <button class="lnk small" data-act="synccancel">Dejar de esperar</button>`);
+  if (!s.at) return box('info', '<b>Todavía no hay datos de AppSheet.</b> Tocá <b>Sincronizar</b> para traerlos.');
+  if (s.info.verificado === false) return box('bad', `<b>La última sincronización (${fmtHora(s.at)}) no pasó la verificación.</b> No tomes decisiones con estos datos: volvé a sincronizar.`);
+  if (!s.hoy) return box('warn', `<b>Estos datos son del ${fmtHora(s.at)}.</b> Tocá <b>Sincronizar</b> para traer lo que hay hoy en AppSheet.`);
+  return '';
+}
+function renderSyncSide() {
+  const el = $('#sidetimer'); if (!el) return; const s = syncInfo();
+  el.innerHTML = `<div class="lbl">Datos de AppSheet</div><div class="small" style="margin:2px 0 8px">${s.at ? `<b class="t-${s.hoy && s.info.verificado !== false ? 'ok' : 'warn'}">${s.hoy ? 'Hoy ' + new Date(s.at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : fmtHora(s.at)}</b>${s.info.links !== undefined ? `<div class="mute">${s.info.links} links · ${s.info.redacciones} redacciones</div>` : ''}${s.info.objetivos ? `<div class="mute">Objetivos del ${fmtD(s.info.objetivos)}</div>` : ''}` : '<span class="mute">Sin sincronizar</span>'}</div>${botonSync().replace('class="btn"', 'class="btn full sm"')}`;
+}
+/** Abre Claude con el pedido y espera (consultando la app cada 10 s) a que lleguen los datos nuevos. */
+function sincronizar() {
+  sincronizarConClaude('sincronizar');
+  S.syncEsperando = { desde: Date.now(), antes: syncInfo().at }; sessionStorage.setItem('pe_sync', JSON.stringify(S.syncEsperando));
+  esperarSync(); render();
+}
+function esperarSync() {
+  clearInterval(S.syncPoll); if (!S.syncEsperando) return;
+  S.syncPoll = setInterval(async () => {
+    if (!S.syncEsperando || Date.now() - S.syncEsperando.desde > 30 * 60000) return terminarEspera();
+    await load();
+    const s = syncInfo();
+    if (s.at > S.syncEsperando.antes) { terminarEspera(); toast(s.info.verificado === false ? 'Llegaron datos, pero no pasaron la verificación' : `Datos de AppSheet actualizados: ${s.info.links} links y ${s.info.redacciones} redacciones`); }
+  }, 10000);
+}
+function terminarEspera() { clearInterval(S.syncPoll); S.syncEsperando = null; sessionStorage.removeItem('pe_sync'); render(); }
 function renderLogin() {
   const alta = S.setup || S.invitacion;
   const intro = S.invitacion === false ? 'Esta invitación ya se usó o no existe. Pedile un link nuevo a quien te invitó.' : S.invitacion ? 'Te invitaron a Proyectos Eleven. Creá tu cuenta con tu mail de Eleven.' : S.setup ? 'Primera vez: creá tu cuenta con tu mail de Eleven.' : 'Ingresá con tu mail (o tu nombre) y tu contraseña.';
@@ -394,15 +425,30 @@ VIEWS_FN.ajustes = () => {
       <p class="small mute" id="pushmsg">Los avisos llegan como notificaciones de Windows aunque la app esté cerrada (Chrome o Edge tienen que estar abiertos en segundo plano).</p></div></div>
     <div class="card"><div class="ch"><h2>Instalar como app de escritorio</h2></div><div class="cb">
       <ol class="steps" style="margin-top:0"><li>Abrí esta página en <b>Chrome</b> o <b>Edge</b>.</li><li>En la barra de direcciones, tocá el ícono de <b>Instalar</b> (o menú ⋮ → <b>Transmitir, guardar y compartir → Instalar página como app</b>).</li><li>Queda con su propia ventana, ícono en la barra de tareas y en el menú Inicio. Clic derecho en el ícono: accesos directos a nueva tarea y cargar horas.</li></ol></div></div>
-    <div class="card"><div class="ch"><h2>Traer tus tareas de AppSheet</h2>${st.as_sync_at ? `<span class="sub">Última vez: ${new Date(Number(st.as_sync_at)).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</span>` : '<span class="tag warn">Pendiente</span>'}</div><div class="cb">
-      <ol class="steps" style="margin-top:0"><li>Mostrá la barra de favoritos del navegador (Ctrl+Mayús+B).</li><li>Arrastrá este botón a la barra: <a class="btn sm" id="bmk" href="#" draggable="true" onclick="return false" title="Arrastralo a la barra de favoritos">↧ Traer de AppSheet</a></li><li>Abrí AppSheet (Eleven - Operaciones) y tocá el favorito. Lee tus links y redacciones (tarda 1 o 2 minutos) y los manda a tu cuenta. Después tocá <b>Actualizar</b> acá.</li></ol>
-      <p class="small mute">Repetilo cuando quieras traer lo último. El botón tiene una clave tuya: no lo compartas. <button class="lnk small" data-act="bmknuevo">Generar una clave nueva</button></p></div></div>
     ${tarjetaClaude()}
     ${S.data.me?.admin ? `<div class="card"><div class="ch"><h2>Usuarios</h2><span class="sub">${S.data.usuarios.length}</span></div><div class="cb">
       <table class="tbl" style="margin-bottom:12px"><tbody><tr><th>Nombre</th><th>Mail</th><th>Modo predeterminado</th><th>Desde</th></tr>${S.data.usuarios.map((u) => `<tr><td>${h(u.nombre)}${u.admin ? ' <span class="tag">admin</span>' : ''}</td><td class="mute">${h(u.email)}</td><td><select class="umodo" data-id="${h(u.id)}" style="width:auto;height:28px">${opts(['tecnico', 'lider'], u.modo || 'tecnico', ['Técnico', 'Líder'])}</select></td><td class="mute small">${new Date(u.created_at).toLocaleDateString('es-AR')}</td></tr>`).join('')}</tbody></table>
       <label class="small" style="display:block;margin-bottom:10px">Link de AppSheet (Eleven - Operaciones): Claude lo abre solo en la bienvenida. Se completa solo la próxima vez que alguien trae tareas.<span style="display:flex;gap:6px;margin-top:4px"><input id="asurl" value="${h(st.as_url || '')}" placeholder="https://www.appsheet.com/start/…"><button class="btn sm sec" data-act="guardarasurl" type="button">Guardar</button></span></label>
       <button class="btn sm" data-act="invitar">Invitar a alguien</button><code class="url" id="invlink" style="margin-top:10px;display:none"></code>
       <p class="small mute">El link sirve para una sola cuenta. Cada persona ve solo sus tareas, horas, prompts y claves. El modo predeterminado es con el que abre la app; cada uno puede alternar entre Técnico y Líder desde la barra lateral.</p></div></div>` : ''}
+    <div class="card"><div class="ch"><h2>Cuenta y datos</h2><span class="sub">${h(S.data.me?.nombre || '')} · ${h(S.data.me?.email || '')}</span></div><div class="cb" style="display:flex;gap:8px"><button class="btn sm sec" data-act="export">Descargar mis datos (JSON)</button><button class="btn sm sec" data-act="logout">Cerrar sesión</button></div></div></div>`,
+  };
+};
+
+// ---------- Ajustes (versión líder) ----------
+VIEWS_FN.lajustes = () => {
+  const s = syncInfo();
+  return {
+    title: 'Ajustes',
+    body: `<div class="cols c11" style="margin-top:0">${tarjetaClaude()}
+    <div class="card"><div class="ch"><h2>Última sincronización</h2>${s.at ? (s.info.verificado === false ? '<span class="tag bad">Sin verificar</span>' : '<span class="tag ok">Verificada</span>') : '<span class="tag warn">Pendiente</span>'}</div><div class="cb">
+      ${s.at ? `<p style="margin-top:0"><b>${fmtHora(s.at)}</b> · ${s.info.links ?? '—'} links · ${s.info.redacciones ?? '—'} redacciones · ${s.info.proyectos ?? '—'} proyectos</p><p class="small mute">Objetivos del mes: ${s.info.objetivos ? 'leídos del reporte el ' + fmtD(s.info.objetivos) : 'no se leyeron en la última sincronización (se muestran los anteriores, con su fecha)'}.</p>` : '<p class="mute" style="margin-top:0">Todavía no se trajo nada de AppSheet.</p>'}
+      <p class="small mute">Cada sincronización lee dos veces cada tabla de AppSheet y del reporte, valida columnas y filas, compara las dos lecturas y recién ahí reemplaza los datos de la app por una foto completa (incluye lo que se borró en AppSheet). Si algo no coincide, no cambia nada. Después compara lo guardado con lo leído.</p></div></div>
+    ${S.data.me?.admin ? `<div class="card"><div class="ch"><h2>Usuarios</h2><span class="sub">${S.data.usuarios.length}</span></div><div class="cb">
+      <table class="tbl" style="margin-bottom:12px"><tbody><tr><th>Nombre</th><th>Mail</th><th>Desde</th></tr>${S.data.usuarios.map((u) => `<tr><td>${h(u.nombre)}${u.admin ? ' <span class="tag">admin</span>' : ''}</td><td class="mute">${h(u.email)}</td><td class="mute small">${new Date(u.created_at).toLocaleDateString('es-AR')}</td></tr>`).join('')}</tbody></table>
+      <label class="small" style="display:block;margin-bottom:10px">Link de AppSheet (Eleven - Operaciones): Claude lo abre al sincronizar.<span style="display:flex;gap:6px;margin-top:4px"><input id="asurl" value="${h(S.data.settings.as_url || '')}" placeholder="https://www.appsheet.com/start/…"><button class="btn sm sec" data-act="guardarasurl" type="button">Guardar</button></span></label>
+      <button class="btn sm" data-act="invitar">Invitar a alguien</button><code class="url" id="invlink" style="margin-top:10px;display:none"></code>
+      <p class="small mute">El link sirve para una sola cuenta. Cada persona ve solo sus proyectos.</p></div></div>` : ''}
     <div class="card"><div class="ch"><h2>Cuenta y datos</h2><span class="sub">${h(S.data.me?.nombre || '')} · ${h(S.data.me?.email || '')}</span></div><div class="cb" style="display:flex;gap:8px"><button class="btn sm sec" data-act="export">Descargar mis datos (JSON)</button><button class="btn sm sec" data-act="logout">Cerrar sesión</button></div></div></div>`,
   };
 };
@@ -430,8 +476,9 @@ async function actualizarTodo() {
 }
 
 // ======================= Modo líder (solo lectura, por proyecto) =======================
-const VIEWS_LIDER = [['tablero', 'Tablero'], ['lproyectos', 'Proyectos'], ['lalertas', 'Para revisar'], ['sep'], ['ajustes', 'Ajustes']];
-const modoActual = () => (S.data?.me ? localStorage.getItem('pe_modo_' + S.data.me.id) || S.data.me.modo || 'tecnico' : 'tecnico');
+const VIEWS_LIDER = [['tablero', 'Tablero'], ['lproyectos', 'Proyectos'], ['lalertas', 'Para revisar'], ['sep'], ['lajustes', 'Ajustes']];
+/** Esta versión es solo para líderes: el modo técnico está deshabilitado. */
+const modoActual = () => 'lider';
 const SEM_TXT = { ok: 'Terminada', warn: 'Por vencer', bad: 'Vencida o con problema', '': 'En curso', off: 'Anulada' };
 const semDot = (c, t) => `<span class="sem sem-${c || 'run'}" title="${h(t || SEM_TXT[c])}"></span>`;
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -451,13 +498,15 @@ VIEWS_FN.tablero = () => {
   const mes = S.f.mes, t = hoy(), ps = S.data.projects.filter((p) => p.active);
   const rs = ps.map((p) => resumenProyecto(p, S.data, mes, t)), lin = rs.filter((r) => r.tipo === 'LIN'), red = rs.filter((r) => r.tipo === 'RED');
   const sum = (arr, k) => arr.reduce((a, r) => a + (r[k] || 0), 0);
-  const pubs = sum(lin, 'terminadas'), obj = sum(lin, 'objetivo') || sum(lin, 'total'), ent = sum(red, 'terminadas'), totRed = sum(red, 'objetivo') || sum(red, 'total');
+  // el objetivo sale solo del reporte de seguimiento; si un proyecto no tiene, se muestra «sin objetivo» (no se inventa con las tareas del mes)
+  const conObj = (arr) => arr.filter((r) => r.objetivo !== null), sinObj = rs.filter((r) => r.objetivo === null).map((r) => r.code);
+  const pubs = sum(conObj(lin), 'terminadas'), obj = sum(conObj(lin), 'objetivo'), ent = sum(conObj(red), 'terminadas'), totRed = sum(conObj(red), 'objetivo');
   const venc = sum(rs, 'vencidas') + sum(rs, 'atrasadasDeOtrosMeses'), porV = sum(rs, 'porVencer');
   const conTope = lin.filter((r) => r.tope), tope = sum(conTope, 'tope'), gast = sum(conTope, 'gastado');
   const a = misAlertas(), qh = quehaceres(a);
   const card = (r) => `<div class="card pcard" data-act="lproy" data-p="${h(r.code)}"><div class="ch"><h2 class="mono">${h(r.code)}</h2><span class="sub">${h(r.cliente)}</span>
       ${r.vencidas + r.atrasadasDeOtrosMeses ? `<span class="tag bad" style="margin-left:auto">${r.vencidas + r.atrasadasDeOtrosMeses} para atender</span>` : r.porVencer ? `<span class="tag warn" style="margin-left:auto">${r.porVencer} por vencer</span>` : `<span class="tag ok" style="margin-left:auto">Al día</span>`}</div>
-    <div class="cb"><div style="display:flex;align-items:baseline;gap:8px"><span class="big">${r.terminadas}</span><span class="mute">de ${r.tipo === 'LIN' ? (r.objetivo ?? r.total) + ' links publicados' : (r.objetivo ?? r.total) + ' redacciones entregadas'}</span></div>
+    <div class="cb"><div style="display:flex;align-items:baseline;gap:8px"><span class="big">${r.terminadas}</span><span class="mute">${r.objetivo === null ? `${r.tipo === 'LIN' ? 'publicados' : 'entregadas'} · <span class="tag warn">sin objetivo</span>` : `de ${r.objetivo} ${r.tipo === 'LIN' ? 'links publicados' : 'redacciones entregadas'} (objetivo)`}</span></div>
       ${barraSemaforo(r)}<div class="small mute" style="margin-top:6px">${r.terminadas} terminadas · ${r.enCurso} en curso · ${r.porVencer} por vencer · ${r.vencidas} vencidas o con problema${r.atrasadasDeOtrosMeses ? ` · ${r.atrasadasDeOtrosMeses} atrasadas de meses anteriores` : ''}</div>${medidorPresupuesto(r)}</div></div>`;
   return {
     title: 'Tablero', sub: `${mesLargo(mes)} · vista de líder, solo lectura`,
@@ -467,6 +516,7 @@ VIEWS_FN.tablero = () => {
       <div class="kpi"><div class="k">Redacciones entregadas</div><div class="v">${ent} <span class="mute" style="font-size:14px;font-weight:500">/ ${totRed}</span></div><div class="meter"><i class="sem-ok" style="width:${pct(ent, totRed)}%"></i></div><div class="d">${pct(ent, totRed)}% del objetivo del mes</div></div>
       <div class="kpi ${venc ? 'hot' : ''}"><div class="k">Vencidas o con problemas</div><div class="v t-${venc ? 'bad' : 'ok'}">${venc}</div><div class="d">${porV} por vencer en 7 días</div></div>
       <div class="kpi"><div class="k">Presupuesto de links usado</div><div class="v">${tope ? pct(gast, tope) + '%' : '—'}</div><div class="meter"><i class="sem-${pct(gast, tope) > 100 ? 'bad' : pct(gast, tope) >= 90 ? 'warn' : 'ok'}" style="width:${Math.min(100, pct(gast, tope))}%"></i></div><div class="d">${tope ? `$ ${fmtN(gast, 0)} de $ ${fmtN(tope, 0)}` : 'Sin topes cargados'}</div></div></div>
+    ${sinObj.length ? `<p class="small mute" style="margin:8px 0 0">Sin objetivo en el reporte de seguimiento (no se cuentan en los totales): ${sinObj.map(h).join(', ')}</p>` : ''}
     <div class="card" style="margin-top:20px"><div class="ch"><h2>Quehaceres</h2><span class="sub">Lo que necesita una decisión o un seguimiento</span></div>${qh.length ? `<table class="tbl"><tbody>${qh.map((q) => `<tr data-act="lproy" data-p="${h(q.p)}" style="cursor:pointer"><td style="width:24px">${semDot(q.c)}</td><td><b>${h(q.txt)}</b>${q.det ? `<div class="small mute">${h(q.det)}</div>` : ''}</td><td class="mono nowrap mute">${h(q.p)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada pendiente.</div>'}</div>
     <h3 class="seccion">Link building</h3><div class="pgrid">${lin.map(card).join('') || '<div class="empty">Sin proyectos de links.</div>'}</div>
     ${red.length ? `<h3 class="seccion">Redacciones</h3><div class="pgrid">${red.map(card).join('')}</div>` : ''}
@@ -499,7 +549,7 @@ VIEWS_FN.lproyectos = () => {
   return {
     title: 'Proyectos', sub: `${p.code} · ${p.cliente} · solo lectura`,
     body: `<div class="chips">${ps.map((q) => `<button class="${q.code === cur ? 'on' : ''}" data-act="lproy" data-p="${h(q.code)}">${h(q.code)}</button>`).join('')}</div>
-    <div class="cols c21" style="margin-top:0"><div class="card"><div class="ch"><h2>${h(p.cliente)} · ${mesLargo(f.mes)}</h2></div><div class="cb">${barraSemaforo(r)}<div class="small mute" style="margin-top:6px">${r.terminadas} terminadas de ${r.objetivo ?? r.total} · ${r.enCurso} en curso · ${r.porVencer} por vencer · ${r.vencidas} vencidas</div></div></div>
+    <div class="cols c21" style="margin-top:0"><div class="card"><div class="ch"><h2>${h(p.cliente)} · ${mesLargo(f.mes)}</h2></div><div class="cb">${barraSemaforo(r)}<div class="small mute" style="margin-top:6px">${r.terminadas} terminadas ${r.objetivo === null ? '(sin objetivo en el reporte)' : `de ${r.objetivo} (objetivo)`} · ${r.enCurso} en curso · ${r.porVencer} por vencer · ${r.vencidas} vencidas</div></div></div>
       <div class="card"><div class="cb">${medidorPresupuesto(r) || '<div class="small mute">Sin presupuesto cargado para este proyecto.</div>'}</div></div></div>
     <div class="toolbar" style="margin-top:16px"><select data-f="lMes"><option value="">Todos los meses</option>${opts(meses, f.lMes, meses.map(mesLargo))}</select>
       <select data-f="lSem">${opts(['', 'bad', 'warn', 'run', 'ok', 'off'], f.lSem, ['Todas (sin anuladas)', 'Vencidas o con problema', 'Por vencer', 'En curso', 'Terminadas', 'Anuladas'])}</select><span class="mute small" style="margin-left:auto">${arr.length} tarea${arr.length === 1 ? '' : 's'}</span></div>
@@ -729,7 +779,7 @@ setInterval(() => {
 }, 30_000);
 function renderTimer() {
   const el = $('#sidetimer'); if (!el) return;
-  if (modoActual() === 'lider') return renderModo();
+  if (modoActual() === 'lider') return renderSyncSide();
   const t = hoy(), auto = S.data.hours.filter((x) => x.auto && x.date === t), tot = auto.reduce((a, x) => a + x.hours, 0);
   const por = {}; for (const a of S.data.actividad || []) por[a.quien] = (por[a.quien] || 0) + (a.fin - a.inicio) / 60000;
   const activo = S.focoAt && Date.now() - S.focoAt < 70_000;
@@ -827,8 +877,7 @@ document.addEventListener('click', async (ev) => {
   const el = ev.target.closest('[data-act]'); if (!el || el.tagName === 'SELECT') return;
   switch (el.dataset.act) {
     case 'invitar': { const r = await api('/api/invites', 'POST'); const el2 = $('#invlink'); el2.style.display = 'block'; el2.textContent = r.link; navigator.clipboard?.writeText(r.link).then(() => toast('Link de invitación copiado')); break; }
-    case 'bmknuevo': if (confirm('El botón anterior deja de funcionar y vas a tener que arrastrar el nuevo. ¿Seguir?')) { await prepararBoton(true); toast('Clave nueva: arrastrá otra vez el botón a la barra'); } break;
-    case 'view': ev.preventDefault(); closeDrawer(); if (el.dataset.v === 'ia') S.iaEstado = null; S.view = el.dataset.v; localStorage.setItem('pe_view', S.view); if (S.view === 'ajustes') { loadCal(); setTimeout(prepararBoton, 0); } $('#view') && ($('#view').scrollTop = 0); render(); break;
+    case 'view': ev.preventDefault(); closeDrawer(); if (el.dataset.v === 'ia') S.iaEstado = null; S.view = el.dataset.v; localStorage.setItem('pe_view', S.view); $('#view') && ($('#view').scrollTop = 0); render(); break;
     case 'newlb': openDrawer(lbForm()); break;
     case 'newlbP': openDrawer(lbForm({ prueba: 1, usuario: YO, estado: 'Gestión de Backlink' })); break;
     case 'newredP': openDrawer(redForm({ prueba: 1, usuario: YO })); break;
@@ -848,7 +897,8 @@ document.addEventListener('click', async (ev) => {
       break;
     }
     case 'tab': S.f[el.dataset.f] = el.dataset.v; render(); break;
-    case 'modo': localStorage.setItem('pe_modo_' + S.data.me.id, el.dataset.v); S.view = el.dataset.v === 'lider' ? 'tablero' : 'inicio'; render(); break;
+    case 'sync': sincronizar(); break;
+    case 'synccancel': terminarEspera(); break;
     case 'lproy': S.f.lProj = el.dataset.p; S.view = 'lproyectos'; render(); $('#view').scrollTop = 0; break;
     case 'verproy': { const p = proj(el.dataset.p); if (p?.tipo === 'RED') { S.view = 'red'; Object.assign(S.f, { redProj: p.code, redEstado: 'activas', redUser: '' }); } else { S.view = 'lb'; Object.assign(S.f, { lbProj: el.dataset.p, lbEstado: 'activas', lbUser: '' }); } render(); break; }
     case 'sug': { const x = misAlertas().sugerencias[Number(el.dataset.i)]; if (x.filtro.view) { S.view = x.filtro.view; } else { S.view = 'lb'; Object.assign(S.f, { lbProj: '', lbMail: '', lbNeg: '', lbMes: '', lbQ: '', lbUser: YO }, x.filtro); } render(); break; }
@@ -868,11 +918,11 @@ document.addEventListener('click', async (ev) => {
     case 'claudeinst': instalarSkill(); break;
     case 'instalarapp': if (instalarEvt) { instalarEvt.prompt(); const r = await instalarEvt.userChoice; if (r.outcome === 'accepted') localStorage.setItem('pe_instalada', '1'); } break;
     case 'bvclaude': localStorage.setItem('pe_claude_via', el.dataset.via); S.bv = { paso: 'espera', via: el.dataset.via, desde: Date.now() - 5000 }; await abrirClaude('bienvenida', el.dataset.via); render(); break;
-    case 'bvsaltar': case 'bvfin': clearInterval(S.bvPoll); localStorage.setItem(claveBienv(), '1'); S.bv = null; if (el.dataset.act === 'bvsaltar') { S.view = 'ajustes'; setTimeout(prepararBoton, 0); } $('#app').innerHTML = ''; render(); break;
+    case 'bvsaltar': case 'bvfin': clearInterval(S.bvPoll); localStorage.setItem(claveBienv(), '1'); S.bv = null; if (el.dataset.act === 'bvsaltar') S.view = 'lajustes'; $('#app').innerHTML = ''; render(); break;
     case 'guardarasurl': { const v = $('#asurl').value.trim(); await api('/api/settings', 'POST', { as_url: v }); await load(); toast(S.data.settings.as_url ? 'Link de AppSheet guardado' : 'El link tiene que empezar con https://www.appsheet.com/start/'); break; }
     case 'claudezip': descargarSkill(); break;
     case 'claudeok': localStorage.setItem('pe_skill', '1'); toast('Listo: la skill queda marcada como instalada'); render(); break;
-    case 'claudesync': sincronizarConClaude(el.dataset.q); break;
+    case 'claudesync': sincronizar(); break;
     case 'asall': document.querySelectorAll('.asck').forEach((c) => { c.checked = true; }); break;
     case 'asdone': { const ids = [...document.querySelectorAll('.asck:checked')].map((c) => Number(c.value)); if (!ids.length) return toast('Seleccioná al menos un cambio'); await api('/api/as/done', 'POST', { ids }); toast('Marcados como reflejados'); await load(); break; }
     case 'saveproj': $('#projf')?.requestSubmit(); break;
@@ -941,22 +991,12 @@ document.addEventListener('keydown', (ev) => {
   if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter' && $('#drawer').classList.contains('open')) $('#drawer form')?.requestSubmit();
 });
 
-/** Arma el favorito "Traer de AppSheet" con la clave de este usuario (el código sale de /traer.js). */
-async function prepararBoton(nueva) {
-  try {
-    const [{ key, origin }, src] = await Promise.all([api('/api/import-key' + (nueva ? '?nueva=1' : '')), fetch('/traer.js', { cache: 'no-store' }).then((r) => r.text())]);
-    const code = src.replace(/^\s*\/\/.*$/gm, '').replace(/\n\s*/g, '\n') + `\ntraerDeAppSheet(${JSON.stringify(key)}, ${JSON.stringify(origin)});`;
-    const a = $('#bmk'); if (a) { a.href = 'javascript:' + encodeURIComponent('(async()=>{' + code + '})()'); a.onclick = () => { toast('Arrastralo a la barra de favoritos y tocalo desde AppSheet'); return false; }; }
-  } catch (e) { toast(e.message); }
-}
 // ---------- Claude (sincronizar con AppSheet desde el Claude de cada uno) ----------
 const datosConexion = (c) => (c.link ? `\n- Enlace para abrir mi app con mi sesión (un solo uso, vence en 1 hora): ${c.link}` : '') + `\n- AppSheet: ${c.as_url || 'la app «Eleven - Operaciones» (buscala en appsheet.com si no la tenés abierta)'}`;
 const PROMPTS_CLAUDE = {
   bienvenida: (o, c) => `Hola Claude. Quiero dejar conectada mi app Proyectos Eleven con mi AppSheet. Leé ${o}/claude/SKILL.md (si todavía no tengo la skill «proyectos-eleven», proponémela para guardar) y seguí la sección «Primera vez» con estos datos:${datosConexion(c)}`,
   instalar: (o) => `Instalá la skill "proyectos-eleven" para poder sincronizar mi app Proyectos Eleven con AppSheet. Leé el archivo ${o}/claude/SKILL.md y proponémelo como skill para guardar, con ese mismo nombre y contenido. Si desde este chat no se pueden guardar skills, decime cómo subirlo.`,
-  todo: (o, c) => `Usá la skill proyectos-eleven para sincronizar mi app con AppSheet: primero traé mis tareas de AppSheet y después pasá los cambios pendientes. Si no tenés la skill, seguí las instrucciones de ${o}/claude/SKILL.md.${datosConexion(c)}`,
-  traer: (o, c) => `Usá la skill proyectos-eleven para traer mis tareas de AppSheet a la app (solo lectura: no cambies nada en AppSheet). Si no tenés la skill, seguí las instrucciones de ${o}/claude/SKILL.md.${datosConexion(c)}`,
-  pasar: (o, c) => `Usá la skill proyectos-eleven para pasar a AppSheet los cambios pendientes de mi app. Si no tenés la skill, seguí las instrucciones de ${o}/claude/SKILL.md.${datosConexion(c)}`,
+  sincronizar: (o, c) => `Usá la skill proyectos-eleven para sincronizar mi app Proyectos Eleven con AppSheet y el reporte de seguimiento (solo lectura: no cambies nada en AppSheet ni en el reporte). Si no tenés la skill, seguí las instrucciones de ${o}/claude/SKILL.md.${datosConexion(c)}`,
 };
 const skillInstalada = () => localStorage.getItem('pe_skill') === '1';
 const viaClaude = () => localStorage.getItem('pe_claude_via') || 'escritorio';
@@ -974,7 +1014,7 @@ function instalarSkill() {
   if (!confirm('Para sincronizar, tu Claude necesita la skill «proyectos-eleven»: las instrucciones para leer y actualizar AppSheet con tu sesión.\n\nSe va a abrir Claude con el pedido de instalación. Enviá el mensaje y tocá Guardar en la tarjeta que aparece.\n\n¿Instalarla ahora?')) return;
   abrirClaude('instalar');
 }
-function sincronizarConClaude(clave = 'todo') {
+function sincronizarConClaude(clave = 'sincronizar') {
   if (!skillInstalada() && confirm('Todavía no marcaste la skill «proyectos-eleven» como instalada en tu Claude. Sin ella, Claude igual puede leer las instrucciones de la app, pero tarda más.\n\n¿Instalarla primero?')) return instalarSkill();
   abrirClaude(clave);
 }
@@ -1024,7 +1064,7 @@ function renderBienvenida() {
   if (S.bv.paso === 'espera' && st.as_sync_at && Number(st.as_sync_at) > S.bv.desde) S.bv.paso = 'listo';
   const nombre = h((me.nombre || '').split(' ')[0]);
   let cuerpo;
-  if (S.bv.paso === 'claude') cuerpo = `<h1>Hola, ${nombre}</h1><p>Ahora conectamos tu Claude. Él abre AppSheet con tu sesión y trae tus tareas; vos solo iniciás sesión cuando te lo pida.</p>
+  if (S.bv.paso === 'claude') cuerpo = `<h1>Hola, ${nombre}</h1><p>Ahora conectamos tu Claude. Él abre AppSheet con tu sesión y trae tus proyectos y tareas (solo lee); vos solo iniciás sesión cuando te lo pida.</p>
       <div class="onb-ops"><button class="onb-op" data-act="bvclaude" data-via="escritorio"><i class="tag acc">Recomendado</i><b>Claude de escritorio</b><span>La app de Claude en tu computadora</span></button>
       <button class="onb-op" data-act="bvclaude" data-via="chrome"><b>Claude in Chrome</b><span>La extensión de Claude en tu Chrome</span></button></div>
       <p class="small mute">¿No tenés Claude? <a href="https://claude.ai/download" target="_blank" rel="noopener">Descargá Claude de escritorio</a>, iniciá sesión y volvé a esta ventana.</p>`;
@@ -1034,13 +1074,13 @@ function renderBienvenida() {
     cuerpo = `<h1>Seguí en Claude</h1><p>Se abrió Claude con el mensaje escrito. Esta ventana se actualiza sola.</p>
       <ul class="onb-check">${it(con, 'Enviá el mensaje', 'Tocá Enviar en Claude. Si te muestra la skill «proyectos-eleven», tocá Guardar.')}
       ${it(con, 'Claude abre tu app', con ? 'Listo: ya la tiene abierta con tu sesión.' : 'Esperando…')}
-      ${it(false, 'Iniciá sesión en AppSheet', 'Claude te abre AppSheet: entrá con tu cuenta de Eleven y avisale. Después te pide permiso para traer tus tareas y actualizarlas solo: aceptá.')}
+      ${it(false, 'Iniciá sesión en AppSheet', 'Claude te abre AppSheet: entrá con tu cuenta de Eleven y avisale. Después lee AppSheet y el reporte dos veces, revisa todo y recién ahí carga tus datos.')}
       ${it(false, 'Tus tareas llegan acá', '<span class="spin"></span> Esperando a Claude…')}</ul>
       <p class="small mute">¿No se abrió Claude? <button class="lnk small" data-act="bvclaude" data-via="${S.bv.via}">Abrirlo de nuevo</button> · <button class="lnk small" data-act="bvclaude" data-via="${S.bv.via === 'chrome' ? 'escritorio' : 'chrome'}">Usar ${S.bv.via === 'chrome' ? 'Claude de escritorio' : 'Claude in Chrome'}</button> · <button class="lnk small" data-act="bvsaltar">Hacerlo sin Claude</button></p>`;
   } else {
     const nl = S.data.lb.length, nr = S.data.red.length;
-    cuerpo = `<h1>¡Listo, ${nombre}!</h1><p>Trajimos <b>${nl} link${nl === 1 ? '' : 's'}</b> y <b>${nr} redaccion${nr === 1 ? '' : 'es'}</b> de AppSheet${S.data.projects.length ? ` de ${S.data.projects.length} proyecto${S.data.projects.length === 1 ? '' : 's'}` : ''}. Si aceptaste la actualización automática, Claude las trae solo cada día hábil.</p>
-      <p class="small mute">Cuando cambies algo en la app, tocá <b>Sincronizar</b> (en Ajustes o en Para AppSheet) y Claude lo pasa a AppSheet después de mostrarte la lista.</p>
+    cuerpo = `<h1>¡Listo, ${nombre}!</h1><p>Trajimos <b>${nl} link${nl === 1 ? '' : 's'}</b> y <b>${nr} redaccion${nr === 1 ? '' : 'es'}</b> de AppSheet${S.data.projects.length ? ` de ${S.data.projects.length} proyecto${S.data.projects.length === 1 ? '' : 's'}` : ''}. </p>
+      <p class="small mute">La app no se actualiza sola: cada vez que quieras ver lo último de AppSheet (por ejemplo, al empezar el día), tocá <b>Sincronizar</b>.</p>
       <button class="btn" data-act="bvfin">Entrar a la app</button>`;
   }
   $('#app').innerHTML = `<div class="login onb">${pasosBienvenida(S.bv.paso === 'listo' ? 4 : 2)}<div class="box">${cuerpo}</div></div>`;
@@ -1049,24 +1089,27 @@ function renderBienvenida() {
 
 function tarjetaClaude() {
   const ok = skillInstalada();
-  return `<div class="card"><div class="ch"><h2>Conectar con Claude</h2>${ok ? '<span class="tag ok">Skill instalada</span>' : '<span class="tag warn">Falta la skill</span>'}</div><div class="cb">
-    <p class="mute" style="margin-top:0">Tu Claude puede traer tus tareas de AppSheet y pasar los cambios pendientes por vos, con tu sesión. Necesitás Claude de escritorio con el navegador integrado (o Claude in Chrome) y haber entrado a AppSheet y a esta app en ese navegador.</p>
-    <ol class="steps"><li><b>Una sola vez:</b> <button class="btn sm${ok ? ' sec' : ''}" data-act="claudeinst">${ic('ia')}Instalar la skill en Claude</button> ${ok ? '' : '<button class="lnk small" data-act="claudeok">Ya la guardé</button>'}<div class="small mute">Se abre Claude con el pedido escrito: lo enviás y tocás <b>Guardar</b>. Si preferís hacerlo a mano: <button class="lnk small" data-act="claudezip">descargá el .zip</button> y subilo en Claude → Personalizar → Skills → + → Subir una skill.</div></li>
-    <li><b>Cada vez que quieras sincronizar:</b> <span class="btnrow"><button class="btn sm" data-act="claudesync" data-q="todo">Sincronizar todo</button><button class="btn sm sec" data-act="claudesync" data-q="traer">Solo traer</button><button class="btn sm sec" data-act="claudesync" data-q="pasar">Solo pasar cambios</button></span><div class="small mute">Antes de escribir en AppSheet, Claude te muestra la lista de cambios y te pide OK. Lo que no pueda pasar (por un aviso de AppSheet) te lo deja anotado.</div></li></ol>
+  return `<div class="card"><div class="ch"><h2>Sincronizar con AppSheet</h2>${ok ? '<span class="tag ok">Skill instalada</span>' : '<span class="tag warn">Falta la skill</span>'}</div><div class="cb">
+    <p class="mute" style="margin-top:0">La app no se actualiza sola: trae lo que hay en AppSheet cuando tocás <b>Sincronizar</b>. Lo hace tu Claude con tu sesión (Claude de escritorio con el navegador integrado, o Claude in Chrome), solo leyendo.</p>
+    <ol class="steps"><li><b>Una sola vez:</b> <button class="btn sm${ok ? ' sec' : ''}" data-act="claudeinst">${ic('ia')}Instalar la skill en Claude</button> ${ok ? '' : '<button class="lnk small" data-act="claudeok">Ya la guardé</button>'}<div class="small mute">Se abre Claude con el pedido escrito: lo enviás y tocás <b>Guardar</b>. A mano: <button class="lnk small" data-act="claudezip">descargá el .zip</button> y subilo en Claude → Personalizar → Skills.</div></li>
+    <li><b>Al empezar el día y cada vez que quieras:</b> ${botonSync().replace('class="btn"', 'class="btn sm"')}<div class="small mute">Se abre Claude con el pedido escrito: tocá Enviar. Cuando termina, esta ventana se actualiza sola.</div></li></ol>
     <p class="small mute" id="claudefb" style="display:none">¿No se abrió Claude? <a href="#" target="_blank" rel="noopener">Abrirlo en el navegador</a> (ahí necesitás Claude in Chrome para que pueda usar AppSheet).</p></div></div>`;
 }
 /** API para el Claude del usuario (la skill proyectos-eleven la usa desde esta pestaña). Todo con la sesión de quien está logueado. */
 window.PE = {
-  version: 1,
-  async yo() { if (!S.token) return null; if (!S.data) await load(); return S.data?.me ? { nombre: S.data.me.nombre, email: S.data.me.email, modo: modoActual() } : null; },
-  async actualizar() { await load(); return { links: S.data.lb.length, redacciones: S.data.red.length, pendientesAppSheet: S.data.as_pend.length }; },
-  async traer() { const { key, origin } = await api('/api/import-key'); return { clave: key, origen: origin }; },
-  async codigoTraer() { const [{ key, origin }, src] = await Promise.all([api('/api/import-key'), fetch('/traer.js', { cache: 'no-store' }).then((r) => r.text())]); return `(async()=>{${src}\nwindow.__peEstado='iniciando';traerDeAppSheet(${JSON.stringify(key)}, ${JSON.stringify(origin)});})();'iniciado'`; },
-  async pendientes() { await load(); return S.data.as_pend.map((a) => ({ id: a.id, tipo: a.entity, codigo: tarea(a.entity, a.ref)?.as_code || '', tarea: a.ref, cambio: a.change, fecha: new Date(a.at).toLocaleString('es-AR') })); },
-  async marcar(ids) { ids = (ids || []).map(Number).filter(Boolean); if (!ids.length) return { ok: false, error: 'Sin ids' }; await api('/api/as/done', 'POST', { ids }); await load(); return { ok: true, marcados: ids.length }; },
-  async pegarEnDoc(tipo, ref) { try { const r = await api('/api/doc/enviar', 'POST', { kind: tipo, ref, conImagen: tipo === 'lb' }); return { ok: true, doc: r.doc }; } catch (e) { return { ok: false, error: e.message }; } },
-  async proyectos() { await load(); return S.data.projects.filter((p) => p.active).map((p) => ({ code: p.code, cliente: p.cliente, tipo: p.tipo, piezasMes: p.params.piezasMes ?? p.params.linksMes ?? null })); },
-  async objetivos(items) { const r = await api('/api/objetivos', 'POST', { items }); await load(); return r; },
+  version: 2,
+  async yo() { if (!S.token) return null; if (!S.data) await load(); return S.data?.me ? { nombre: S.data.me.nombre, email: S.data.me.email, modo: 'lider' } : null; },
+  async actualizar() { await load(); const s = syncInfo(); return { links: S.data.lb.length, redacciones: S.data.red.length, proyectos: S.data.projects.filter((p) => p.active).length, ultimaSync: s.at ? fmtHora(s.at) : null }; },
+  /** Empieza una sincronización: devuelve { sid, clave, origen } para los códigos de lectura de la skill. */
+  async syncIniciar() { return api('/api/sync/iniciar', 'POST', {}); },
+  /** Revisa lo leído sin escribir nada: errores, advertencias, diferencias y si hace falta confirmación. */
+  async syncRevisar(sid) { try { return await api('/api/sync/revisar', 'POST', { sid }); } catch (e) { return { ok: false, errores: [e.message] }; } },
+  /** Aplica todo junto (o nada) y devuelve la verificación de lo guardado. */
+  async syncAplicar(sid, confirmar = false) {
+    const r = await fetch('/api/sync/aplicar', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token }, body: JSON.stringify({ sid, confirmar: confirmar === true }) });
+    const j = await r.json().catch(() => ({})); await load();
+    return r.ok ? j : { ok: false, aplicado: false, error: j.error || 'Error ' + r.status, informe: j.informe };
+  },
   async tiempo(accion, inicio, fin, refs = []) { const rs = refs.map((r) => ({ kind: r.tipo || r.kind, ref: r.tarea || r.ref })); if (!rs.length) return { ok: true, nota: 'sin tareas para asignar el tiempo' }; await api('/api/act/agente', 'POST', { quien: 'claude', refs: rs, accion, inicio, fin }); return { ok: true }; },
 };
 
@@ -1098,10 +1141,10 @@ const qs = new URLSearchParams(location.search);
   }
   if (S.token) {
     try { S.data = separarPruebas(JSON.parse(localStorage.getItem('pe_cache') || 'null')); tomarUsuario(); } catch { /* nada */ }
-    if (S.data) render(); if (S.view === 'ajustes') { loadCal(); setTimeout(prepararBoton, 300); } await load();
+    try { S.syncEsperando = JSON.parse(sessionStorage.getItem('pe_sync') || 'null'); } catch { /* nada */ } esperarSync();
+    if (S.data) render(); await load();
     if (qs.get('invitacion')) { toast('Ya tenés una sesión abierta: para usar la invitación, cerrá sesión en Ajustes o abrí el link en otro navegador.'); }
-    const n = qs.get('nuevo'); if (n === 'lb') openDrawer(lbForm()); else if (n === 'red') openDrawer(redForm()); else if (n === 'horas') openDrawer(hoursForm());
-    if (n) history.replaceState(null, '', '/');
+    if (qs.get('nuevo')) history.replaceState(null, '', '/');
     return;
   }
   if (qs.get('invitacion')) localStorage.setItem('pe_inv', qs.get('invitacion'));

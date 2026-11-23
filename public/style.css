@@ -95,6 +95,7 @@ label{display:block;font-size:12px;font-weight:500;color:var(--ink2)}label>input
 .section{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:6px 0 0;grid-column:1/-1;border-top:1px solid var(--line);padding-top:16px}
 .section:first-child{margin-top:0;border-top:0;padding-top:0}
 .alert{border:1px solid #fedf89;background:var(--warn-bg);border-radius:var(--rad);padding:10px 12px;margin-top:14px}
+.alert.bad{border-color:#fecdca;background:var(--bad-bg)}.alert.info{border-color:#c7d7fe;background:var(--acc-bg)}
 .err{color:var(--bad);font-size:12.5px;margin-top:10px}.err:empty{display:none}
 
 /* ingreso */
