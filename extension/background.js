@@ -64,14 +64,15 @@ async function actualizar() {
   await terminar(resultado.partes);
 }
 
-/** Abre la página en una pestaña de fondo, la lee y la cierra. */
+/** Abre la página en una ventana chica a la vista (sin robarte el foco: AppSheet no dibuja las tablas en pestañas de fondo), la lee y la cierra. */
 async function leerEn(url, config, que, limite) {
-  const tab = await chrome.tabs.create({ url, active: false }); propias.add(tab.id);
-  chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {}); // que Chrome no la descarte (cambiaría su id)
+  const w = await chrome.windows.create({ url, focused: false, type: 'popup', width: 1100, height: 800 });
+  const tab = w.tabs[0]; propias.add(tab.id);
+  chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   try {
     for (let i = 0; i < 120; i++) { await espera(1000); const t = await chrome.tabs.get(tab.id); if (t.status === 'complete') break; }
     return await correrEn(tab.id, config, que, limite);
-  } finally { propias.delete(tab.id); chrome.tabs.remove(tab.id).catch(() => {}); }
+  } finally { propias.delete(tab.id); chrome.windows.remove(w.id).catch(() => {}); }
 }
 /** Corre el lector (el mismo del botón de favoritos) en una pestaña ya abierta y espera su resultado. */
 async function correrEn(tabId, config, que, limite) {

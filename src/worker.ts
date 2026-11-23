@@ -275,8 +275,8 @@ export async function importAS(env: Env, b: any) {
   // proyectos: los de "Tus Proyectos" en AppSheet y los que tengan alguna tarea asignada a esta persona
   const proyDe = (code: string) => str(code, 40).toUpperCase().replace(/-\d+$/, '');
   const quiero = new Set<string>([...(Array.isArray(b.proyectos) ? b.proyectos.map((c: unknown) => str(c, 40).toUpperCase()) : []),
-    ...(Array.isArray(b.lb) ? b.lb : []).filter((r: any) => str(r[10], 80) === yo).map((r: any) => proyDe(r[0])),
-    ...(Array.isArray(b.red) ? b.red : []).filter((r: any) => str(r[10], 80) === yo).map((r: any) => proyDe(r[0]))]);
+    ...(Array.isArray(b.lb) ? b.lb : []).filter((r: any) => sinTildes(str(r[10], 80)) === sinTildes(yo)).map((r: any) => proyDe(r[0])),
+    ...(Array.isArray(b.red) ? b.red : []).filter((r: any) => sinTildes(str(r[10], 80)) === sinTildes(yo)).map((r: any) => proyDe(r[0]))]);
   if (env.U?.alcance === 'lider') for (const c of await proyectosQueLidera(env)) quiero.add(c);
   let orden = codes.size;
   for (const c of quiero) {
