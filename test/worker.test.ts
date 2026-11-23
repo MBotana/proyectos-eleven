@@ -509,3 +509,8 @@ test('favorito: si hay cambios sospechosos queda esperando tu confirmación en l
   assert.equal(ok.status, 200); assert.equal(ok.j.verificacion.ok, true);
   d = (await call(env, '/api/data', 'GET', undefined, tok)).j; assert.equal(d.lb.length, 2); assert.equal(d.sync_pend, null);
 });
+
+test('el front limpia las marcas de una cuenta anterior al crear una cuenta nueva', async () => {
+  const fs = await import('node:fs'), src = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.ok(/if \(S\.invitacion \|\| S\.setup\) \{[\s\S]{0,260}pe_\(bienv_\|instalada\$/.test(src), 'al crear la cuenta se borran pe_bienv_*, pe_instalada y afines');
+});

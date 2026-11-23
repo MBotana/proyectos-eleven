@@ -969,6 +969,10 @@ document.addEventListener('submit', async (ev) => {
       const r = S.invitacion ? await api('/api/signup', 'POST', { invitacion: S.invitacionToken, email: f.email.value, password: f.pw.value })
         : S.setup ? await api('/api/setup', 'POST', { email: f.email.value, password: f.pw.value })
         : await api('/api/login', 'POST', { usuario: f.usuario.value, password: f.pw.value });
+      if (S.invitacion || S.setup) { // cuenta nueva: se borran las marcas que dejó una cuenta anterior en este navegador (los usuarios se numeran de nuevo si se vacía la base)
+        for (const k of Object.keys(localStorage)) if (/^pe_(bienv_|instalada$|skill$|claude_via$|inv$)/.test(k)) localStorage.removeItem(k);
+        sessionStorage.removeItem('pe_claude'); sessionStorage.removeItem('pe_sync'); S.bv = null; S.syncEsperando = null;
+      }
       S.token = r.token; localStorage.setItem('pe_token', r.token); localStorage.removeItem('pe_inv'); S.setup = false; S.invitacion = undefined; history.replaceState(null, '', '/'); $('#app').innerHTML = ''; await load();
     }
     catch (e) { $('#lerr').textContent = e.message; }
